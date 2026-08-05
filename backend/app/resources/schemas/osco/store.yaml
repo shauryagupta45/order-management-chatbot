@@ -1,0 +1,754 @@
+database: osco
+collection: store
+display_name: Store
+description: OSCO store configuration document. Use this collection for store identity, address, operating hours, carrier settings, fulfillment type config, shift schedules, staging buffers, and store feature toggles.
+business_context:
+  primary_entity: store
+  common_user_phrases:
+    - find store by store id
+    - get store details
+    - lookup store config
+    - show store settings
+    - what banner is store
+    - store address
+    - store hours
+    - store timezone
+    - store carrier
+    - show store feature flags
+    - is express order enabled for store
+    - is mfc store
+    - is dark store
+    - store division
+    - store rog code
+    - staging buffer for store
+    - shift schedule for store
+    - stage by time for store
+  when_to_use: Use this collection for OSCO store-level configuration records, including store identity, banner, division, address, operating hours, default carrier, short order number sequences, staging rules, shift schedules, MFC config, and store feature toggles (storeInfo).
+  when_not_to_use: Do not use for order-level questions. For store flags embedded on an order document, use the osco.order collection (storeFlags.* or storeInfo.* fields on the order).
+aliases:
+  - store
+  - stores
+  - store config
+  - store configuration
+  - store record
+identity:
+  primary_key: _id
+  business_keys:
+    - storeId
+    - mfcStoreId
+default_limit: 10
+fields:
+  # Mongo document identity.
+  _id:
+    type: objectId
+    description: MongoDB internal document id. Use only when the user explicitly provides a Mongo document id/ObjectId.
+    synonyms:
+      - mongo id
+      - document id
+      - object id
+      - _id
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+
+  # Primary store identifiers.
+  storeId:
+    type: string
+    description: Primary store business identifier. Prefer this field when the user says store id, store number, or asks to find a store. Stored as a zero-padded string such as "0606".
+    synonyms:
+      - store id
+      - store number
+      - store no
+      - store identifier
+      - osco store id
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "0606"
+      - "0177"
+  mfcStoreId:
+    type: integer
+    description: Numeric MFC store identifier. Use this when the user asks for the MFC store id or numeric store id.
+    synonyms:
+      - mfc store id
+      - mfc id
+      - numeric store id
+      - mfc store number
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - 256345
+  corporationId:
+    type: string
+    description: Corporation identifier associated with the store.
+    synonyms:
+      - corporation id
+      - corp id
+      - corporation number
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - "15693698"
+  divisionId:
+    type: string
+    description: Division identifier associated with the store.
+    synonyms:
+      - division id
+      - division number
+      - division
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - "25"
+  rogCd:
+    type: string
+    description: ROG (Ring of Grocery) code for the store, indicating the regional grouping.
+    synonyms:
+      - rog code
+      - rog cd
+      - ring of grocery
+      - rog
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - SNCA
+  banner:
+    type: string
+    description: Retail banner for the store, such as SAFEWAY or VONS.
+    synonyms:
+      - banner
+      - retail banner
+      - store banner
+      - brand
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - SAFEWAY
+  version:
+    type: integer
+    description: Document version number for the store configuration record.
+    synonyms:
+      - version
+      - store version
+      - config version
+      - document version
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+
+  # Store type flags.
+  isMfc:
+    type: boolean
+    description: Indicates whether this store is a Micro-Fulfillment Center (MFC).
+    synonyms:
+      - is mfc
+      - mfc store
+      - micro fulfillment center
+      - mfc flag
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+  isWfc:
+    type: boolean
+    description: Indicates whether this store is a Warehouse Fulfillment Center (WFC).
+    synonyms:
+      - is wfc
+      - wfc store
+      - warehouse fulfillment center
+      - wfc flag
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+  isFfc:
+    type: boolean
+    description: Indicates whether this store is a Full Fulfillment Center (FFC).
+    synonyms:
+      - is ffc
+      - ffc store
+      - full fulfillment center
+      - ffc flag
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+  darkStore:
+    type: boolean
+    description: Indicates whether this store operates as a dark store (fulfillment only, no retail walk-in).
+    synonyms:
+      - dark store
+      - is dark store
+      - dark store flag
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+
+  # Operational settings.
+  timeZone:
+    type: string
+    description: IANA time zone for the store, used to interpret local operating hours and slot times.
+    synonyms:
+      - time zone
+      - timezone
+      - store timezone
+      - store time zone
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - America/Los_Angeles
+      - America/Denver
+  safetyStock:
+    type: integer
+    description: Safety stock buffer level configured for this store.
+    synonyms:
+      - safety stock
+      - stock buffer
+      - store safety stock
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  stagingBufferInMins:
+    type: integer
+    description: Staging buffer time in minutes before a delivery or pickup window.
+    synonyms:
+      - staging buffer
+      - staging buffer in mins
+      - staging time
+      - stage buffer minutes
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+
+  # Store address. City/state are lower sensitivity but still address data; return only when requested.
+  address.addressLine1:
+    type: string
+    description: Store street address line 1.
+    synonyms:
+      - store address
+      - address line 1
+      - street address
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: false
+    sensitive: false
+  address.addressLine2:
+    type: string
+    description: Store street address line 2.
+    synonyms:
+      - address line 2
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: false
+  address.city:
+    type: string
+    description: City where the store is located.
+    synonyms:
+      - store city
+      - city
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - South San Francisco
+  address.state:
+    type: string
+    description: State where the store is located.
+    synonyms:
+      - store state
+      - state
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - CA
+  address.zipCode:
+    type: string
+    description: ZIP/postal code for the store location.
+    synonyms:
+      - store zip
+      - zip code
+      - postal code
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+
+  # Regular hours.
+  regularHours.startHour:
+    type: string
+    description: Regular opening hour for the store in HH:MM format (local store time).
+    synonyms:
+      - opening hour
+      - start hour
+      - regular start hour
+      - store open time
+      - open time
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "07:00"
+  regularHours.endHour:
+    type: string
+    description: Regular closing hour for the store in HH:MM format (local store time).
+    synonyms:
+      - closing hour
+      - end hour
+      - regular end hour
+      - store close time
+      - close time
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "18:00"
+
+  # Default carrier configuration.
+  defaultCarrier.carrierCd:
+    type: string
+    description: Carrier code for the store's default delivery carrier, such as DDS for DoorDash.
+    synonyms:
+      - carrier code
+      - default carrier code
+      - carrier cd
+      - delivery carrier code
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - DDS
+      - UR
+  defaultCarrier.carrierName:
+    type: string
+    description: Human-readable name of the store's default delivery carrier.
+    synonyms:
+      - carrier name
+      - default carrier
+      - delivery carrier
+      - carrier
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - Door Dash
+  defaultCarrier.departureTimeInMins:
+    type: integer
+    description: Default departure lead time in minutes for the carrier before delivery window start.
+    synonyms:
+      - departure time
+      - carrier departure time
+      - departure time in mins
+      - carrier lead time
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+
+  # Short order number sequences per delivery type and carrier.
+  shortOrderNumber.deliveryType:
+    type: string
+    description: Delivery type associated with a short order number sequence, such as DUG or DELIVERY.
+    synonyms:
+      - short order delivery type
+      - delivery type
+      - short order number delivery type
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - DUG
+      - DELIVERY
+  shortOrderNumber.shortOrderNumberSequence:
+    type: integer
+    description: Current sequence counter for short order numbers for a given delivery type and carrier.
+    synonyms:
+      - short order number sequence
+      - short order sequence
+      - order sequence
+      - son sequence
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  shortOrderNumber.carrierCd:
+    type: string
+    description: Carrier code scoping the short order number sequence. Not always present.
+    synonyms:
+      - short order carrier
+      - short order carrier code
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+
+  # Stage-by datetime offsets per delivery type and carrier.
+  stageByDateTime.deliveryType:
+    type: string
+    description: Delivery type associated with a stage-by rule, such as DUG or DELIVERY.
+    synonyms:
+      - stage by delivery type
+      - stage by type
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - DUG
+      - DELIVERY
+  stageByDateTime.stageByDateTimeInMins:
+    type: integer
+    description: Minutes before delivery window by which the order must be staged.
+    synonyms:
+      - stage by time
+      - stage by in mins
+      - stage by minutes
+      - staging deadline minutes
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  stageByDateTime.carrierCd:
+    type: string
+    description: Carrier code scoping the stage-by rule. Not always present.
+    synonyms:
+      - stage by carrier
+      - stage by carrier code
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+
+  # Shift schedule. Each entry maps a delivery start time to a shift number and stage-by duration.
+  shift.deliveryStartTimeInHrs:
+    type: string
+    description: Delivery window start time (HH:MM) that determines which shift applies.
+    synonyms:
+      - shift start time
+      - delivery start time
+      - shift delivery start
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "07:00"
+      - "14:00"
+  shift.shiftNumber:
+    type: integer
+    description: Shift number associated with a delivery start time range.
+    synonyms:
+      - shift number
+      - shift
+      - store shift
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - 7
+      - 14
+  shift.stageByDateTimeInHrs:
+    type: string
+    description: Stage-by duration in HH:MM for orders falling within this shift's delivery window.
+    synonyms:
+      - shift stage by time
+      - stage by hrs
+      - shift staging time
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+
+  # MFC config values — banners and fulfillment types supported by the MFC.
+  mfcConfigValues.banner:
+    type: array
+    description: List of banners supported by the MFC configuration for this store, such as SafewayONE.
+    synonyms:
+      - mfc banner
+      - mfc supported banners
+      - mfc config banner
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - SafewayONE
+  mfcConfigValues.fulfillmentType:
+    type: array
+    description: List of fulfillment types supported by the MFC configuration, such as DELIVERYONE or DUGONE.
+    synonyms:
+      - mfc fulfillment type
+      - mfc supported fulfillment types
+      - mfc config fulfillment type
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - DELIVERYONE
+      - DUGONE
+
+  # Store feature toggles (storeInfo). Each key is a named feature flag with a usage description and a value string.
+  storeInfo.storeEnabledExpressOrder.value:
+    type: string
+    description: Feature toggle value indicating whether express order is enabled for this store. "true" means enabled.
+    synonyms:
+      - express order enabled
+      - store enabled express order
+      - express order toggle
+      - express order flag
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "true"
+      - "false"
+  storeInfo.pricingWorkflowEnable.value:
+    type: string
+    description: Feature toggle value indicating whether the pricing workflow is enabled for this store.
+    synonyms:
+      - pricing workflow enabled
+      - pricing workflow toggle
+      - pricing workflow flag
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  storeInfo.isApprovedSubsEnabled.value:
+    type: string
+    description: Feature toggle value indicating whether the CAS (customer-approved substitutions) feature is enabled.
+    synonyms:
+      - approved subs enabled
+      - cas enabled
+      - approved substitutions
+      - isApprovedSubsEnabled
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  storeInfo.isCustomerCentricTillingEnabled.value:
+    type: string
+    description: Feature toggle value indicating whether customer-centric tilling (CCT) is enabled.
+    synonyms:
+      - cct enabled
+      - customer centric tilling
+      - customer centric tilling enabled
+      - isCustomerCentricTillingEnabled
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  storeInfo.isWysiWygEnabled.value:
+    type: string
+    description: Feature toggle value indicating whether WYSIWYG is enabled for this store.
+    synonyms:
+      - wysiwyg enabled
+      - is wysiwyg enabled
+      - wysiwyg
+      - isWysiWygEnabled
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  storeInfo.isAlcoholDeliveryRestricted.value:
+    type: string
+    description: Feature toggle value indicating whether alcohol delivery is restricted for this store.
+    synonyms:
+      - alcohol delivery restricted
+      - isAlcoholDeliveryRestricted
+      - alcohol delivery restriction
+      - alcohol delivery flag
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  storeInfo.isAlcoholDugRestricted.value:
+    type: string
+    description: Feature toggle value indicating whether alcohol is restricted for DUG (drive-up and go) orders.
+    synonyms:
+      - alcohol dug restricted
+      - isAlcoholDugRestricted
+      - alcohol dug restriction
+      - alcohol pickup flag
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+
+sample_queries:
+  - user_request: find store 0606
+    target:
+      database: osco
+      collection: store
+      filter:
+        storeId: "0606"
+  - user_request: get store details for store id 0177
+    target:
+      database: osco
+      collection: store
+      filter:
+        storeId: "0177"
+  - user_request: show all SAFEWAY stores
+    target:
+      database: osco
+      collection: store
+      filter:
+        banner: SAFEWAY
+  - user_request: show stores in division 25
+    target:
+      database: osco
+      collection: store
+      filter:
+        divisionId: "25"
+  - user_request: is express order enabled for store 0606
+    target:
+      database: osco
+      collection: store
+      filter:
+        storeId: "0606"
+      fields:
+        - storeId
+        - storeInfo.storeEnabledExpressOrder.value
+  - user_request: show all MFC stores
+    target:
+      database: osco
+      collection: store
+      filter:
+        isMfc: true
+  - user_request: find dark stores
+    target:
+      database: osco
+      collection: store
+      filter:
+        darkStore: true
+  - user_request: what is the staging buffer for store 0606
+    target:
+      database: osco
+      collection: store
+      filter:
+        storeId: "0606"
+      fields:
+        - storeId
+        - stagingBufferInMins
+        - stageByDateTime
+  - user_request: show stores using DDS as default carrier
+    target:
+      database: osco
+      collection: store
+      filter:
+        defaultCarrier.carrierCd: DDS
+  - user_request: show store address for store 0606
+    target:
+      database: osco
+      collection: store
+      filter:
+        storeId: "0606"
+      fields:
+        - storeId
+        - address
+
+# Sample store document (reference used to build this schema — kept for context):
+# {
+#   "version": 27,
+#   "regularHours": { "startHour": "07:00", "endHour": "18:00" },
+#   "storeId": "0606",
+#   "mfcStoreId": 256345,
+#   "corporationId": "15693698",
+#   "divisionId": "25",
+#   "rogCd": "SNCA",
+#   "address": {
+#     "addressLine1": "2255 Gellert Blvd",
+#     "addressLine2": "",
+#     "city": "South San Francisco",
+#     "state": "CA",
+#     "zipCode": "94080"
+#   },
+#   "safetyStock": 10,
+#   "isMfc": false,
+#   "isWfc": false,
+#   "isFfc": false,
+#   "timeZone": "America/Los_Angeles",
+#   "banner": "SAFEWAY",
+#   "stagingBufferInMins": 20,
+#   "defaultCarrier": { "carrierCd": "DDS", "carrierName": "Door Dash", "departureTimeInMins": 30 },
+#   "shortOrderNumber": [
+#     { "deliveryType": "DUG", "shortOrderNumberSequence": 157 },
+#     { "deliveryType": "DUG", "shortOrderNumberSequence": 1, "carrierCd": "UR" },
+#     { "deliveryType": "DELIVERY", "shortOrderNumberSequence": 681, "carrierCd": "DDS" }
+#   ],
+#   "stageByDateTime": [
+#     { "deliveryType": "DUG", "stageByDateTimeInMins": 60 },
+#     { "deliveryType": "DELIVERY", "stageByDateTimeInMins": 40, "carrierCd": "DDS" }
+#   ],
+#   "shift": [
+#     { "deliveryStartTimeInHrs": "07:00", "shiftNumber": 7, "stageByDateTimeInHrs": "02:00" },
+#     ...
+#   ],
+#   "mfcConfigValues": {
+#     "banner": ["SafewayONE"],
+#     "fulfillmentType": ["DELIVERYONE", "DUGONE"]
+#   },
+#   "storeInfo": {
+#     "storeEnabledExpressOrder": { "usage": "...", "value": "true" },
+#     "pricingWorkflowEnable": { "usage": "...", "value": "true" },
+#     "isApprovedSubsEnabled": { "usage": "...", "value": "true" },
+#     "isCustomerCentricTillingEnabled": { "usage": "...", "value": "true" },
+#     "isWysiWygEnabled": { "usage": "...", "value": "true" },
+#     "isAlcoholDeliveryRestricted": { "usage": "...", "value": "true" },
+#     "isAlcoholDugRestricted": { "usage": "...", "value": "true" }
+#   },
+#   "darkStore": false,
+#   "_class": "com.albertsons.ecommerce.osco.model.StoreModel"
+# }

@@ -1,0 +1,114 @@
+databases:
+  - name: orderff
+    display_name: Order FF
+    description: Order fulfillment database containing operational, task, picking, shipment, retry, monitoring, and event collections.
+    aliases:
+      - order ff
+      - order fulfillment
+      - fulfillment db
+      - orderff db
+    collections:
+      - name: batchjob
+        schema_file: schemas/orderff/batchjob.yaml
+        description: Batch job records for order fulfillment processing.
+      - name: business_rules
+        schema_file: schemas/orderff/business_rules.yaml
+        description: Business rule configuration for order fulfillment workflows.
+      - name: completed_orderline
+        schema_file: schemas/orderff/completed_orderline.yaml
+        description: Completed order line records.
+      - name: events
+        schema_file: schemas/orderff/events.yaml
+        description: Event records for order fulfillment processing.
+      - name: failed_apis
+        schema_file: schemas/orderff/failed_apis.yaml
+        description: Failed API call records.
+      - name: lrs
+        schema_file: schemas/orderff/lrs.yaml
+        description: LRS records.
+      - name: monitoring_events
+        schema_file: schemas/orderff/monitoring_events.yaml
+        description: Monitoring event records.
+      - name: monitoring_rules
+        schema_file: schemas/orderff/monitoring_rules.yaml
+        description: Monitoring rule records. Collection name is preserved as provided.
+      - name: order_picking_status
+        schema_file: schemas/orderff/order_picking_status.yaml
+        description: Order picking status records.
+      - name: oslm3p_pickedorder
+        schema_file: schemas/orderff/oslm3p_pickedorder.yaml
+        description: OSLM third-party picked order records.
+      - name: posPickedOrder
+        schema_file: schemas/orderff/posPickedOrder.yaml
+        description: POS picked order records.
+      - name: release_task
+        schema_file: schemas/orderff/release_task.yaml
+        description: Release task records.
+      - name: repost_configs
+        schema_file: schemas/orderff/repost_configs.yaml
+        description: Repost configuration records.
+      - name: retry_rules
+        schema_file: schemas/orderff/retry_rules.yaml
+        description: Retry rule records.
+      - name: shipment
+        schema_file: schemas/orderff/shipment.yaml
+        description: Shipment records.
+      - name: site
+        schema_file: schemas/orderff/site.yaml
+        description: Site records.
+      - name: task
+        schema_file: schemas/orderff/task.yaml
+        description: Task records.
+      - name: transitions
+        schema_file: schemas/orderff/transitions.yaml
+        description: State transition records.
+
+  - name: osco
+    display_name: OSCO
+    description: OSCO database containing order, store, event, pricing, state, audit, report, and summary collections.
+    aliases:
+      - osco db
+      - osco database
+    collections:
+      - name: batchjob
+        schema_file: schemas/osco/batchjob.yaml
+        description: Batch job records for OSCO processing.
+      - name: ccpa_audit_rits
+        schema_file: schemas/osco/ccpa_audit_rits.yaml
+        description: CCPA audit RITS records.
+      - name: datFile
+        schema_file: schemas/osco/datFile.yaml
+        description: DAT file records.
+      - name: events
+        schema_file: schemas/osco/events.yaml
+        description: OSCO event records.
+      - name: failed_apis
+        schema_file: schemas/osco/failed_apis.yaml
+        description: Failed API call records.
+      - name: order
+        schema_file: schemas/osco/order.yaml
+        description: Primary order records.
+      - name: orderHistory
+        schema_file: schemas/osco/orderHistory.yaml
+        description: Order history records.
+      - name: orderSummary
+        schema_file: schemas/osco/orderSummary.yaml
+        description: Order summary records.
+      - name: pricingData
+        schema_file: schemas/osco/pricingData.yaml
+        description: Pricing data records.
+      - name: reportJob
+        schema_file: schemas/osco/reportJob.yaml
+        description: Report job records.
+      - name: stateDetails
+        schema_file: schemas/osco/stateDetails.yaml
+        description: State detail records.
+      - name: store
+        schema_file: schemas/osco/store.yaml
+        description: Store records.
+      - name: sub_future_preference
+        schema_file: schemas/osco/sub_future_preference.yaml
+        description: Subscription future preference records.
+      - name: summary_sequence
+        schema_file: schemas/osco/summary_sequence.yaml
+        description: Summary sequence records.

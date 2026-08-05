@@ -1,0 +1,2551 @@
+database: osco
+collection: order
+display_name: Order
+description: Primary OSCO order document. Use this collection for order header, customer, status, fulfillment, payment status, sub-order, delivery slot, tote, exception, and order-line questions.
+business_context:
+  primary_entity: order
+  common_user_phrases:
+    - find order by order number
+    - get order details
+    - lookup osco order
+    - search order id
+    - find customer order
+    - show order status
+    - show sub order details
+    - show order lines
+    - show delivery slot
+  when_to_use: Use this collection for OSCO order-level records, including order status, store, fulfillment system, customer id, order totals, payment status, sub-orders, delivery details, tote details, exceptions, and item lines.
+  when_not_to_use: Do not use for order summary-only reporting if the user explicitly asks for orderSummary, or for historical changes if the user explicitly asks for orderHistory.
+aliases:
+  - order
+  - customer order
+  - order document
+  - order record
+identity:
+  primary_key: _id
+  business_keys:
+    - orderNumber
+    - posTransactionNumber
+    - customer.customerId
+    - subOrders.fulfillmentOrderNumber
+default_limit: 10
+fields:
+  # Mongo document identity. Use only when the user gives a Mongo/ObjectId value.
+  _id:
+    type: objectId
+    description: MongoDB internal document id. Use only when the user explicitly provides a Mongo document id/ObjectId.
+    synonyms:
+      - mongo id
+      - document id
+      - object id
+      - _id
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+
+  # Intentionally ignored infrastructure fields:
+  # - version: audit/storage version, not the business order version. Prefer versionNumber.
+  # - createdBy, createdDate, modifiedBy, modifiedDate: technical audit fields. Prefer orderCreatedDate for order creation.
+  # - ttl: retention/storage control, not useful for order questions.
+
+  # Primary business identifiers. Prefer orderNumber when the user says order id/order number.
+  orderNumber:
+    type: string
+    description: Primary customer/order business identifier. Prefer this field when the user says order number, order id, customer order id, or asks to find an order.
+    synonyms:
+      - order number
+      - order no
+      - order id
+      - customer order id
+      - order reference
+      - osco order id
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "234536376"
+  versionNumber:
+    type: integer
+    description: Business order version number. Use this when the user asks for the order version. Do not confuse this with the ignored technical field named version.
+    synonyms:
+      - order version
+      - business version
+      - version number
+      - versionNumber
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - 1
+  posTransactionNumber:
+    type: string
+    description: POS transaction number associated with the order.
+    synonyms:
+      - pos transaction
+      - pos transaction number
+      - transaction number
+      - pos id
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - POS12345
+  cartId:
+    type: string
+    description: Cart identifier associated with the order before checkout. Use this when the user asks for cart id/cart number.
+    synonyms:
+      - cart id
+      - cart number
+      - basket id
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "289735733"
+
+  # Store and fulfillment routing. Use these for store, MFC, fulfillment, company, and active/inactive questions.
+  storeNumber:
+    type: string
+    description: Store number where the order is associated.
+    synonyms:
+      - store number
+      - store id
+      - order store
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "0177"
+  fulfillmentStoreNumber:
+    type: string
+    description: Store number responsible for fulfilling the order.
+    synonyms:
+      - fulfillment store
+      - fulfillment store number
+      - picking store
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "0177"
+  fulfillmentSystem:
+    type: string
+    description: Fulfillment system handling the order. When the user says "bakery order" or "bakery orders", this maps to fulfillmentSystem = ACUMTO.
+    synonyms:
+      - fulfillment system
+      - mfc
+      - fulfillment platform
+      - bakery
+      - bakery order
+      - bakery orders
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - ACUMTO
+      - APS
+      - MFC
+  companyId:
+    type: string
+    description: Company or banner identifier for the order.
+    synonyms:
+      - company id
+      - banner id
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "1"
+  banner:
+    type: string
+    description: Retail banner for the order, such as safeway.
+    synonyms:
+      - banner
+      - retail banner
+      - store banner
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - safeway
+  isActive:
+    type: boolean
+    description: Indicates whether the order record is currently active.
+    synonyms:
+      - active
+      - active order
+      - is active
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+  orderCount:
+    type: integer
+    description: Count value stored on the order document.
+    synonyms:
+      - order count
+      - count
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  pickerFirstName:
+    type: string
+    description: First name of the picker associated with the order. Operational person name; do not return by default.
+    synonyms:
+      - picker first name
+      - picker name
+      - picked by
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: true
+  isRetry:
+    type: boolean
+    description: Indicates whether the order document is marked for retry/reprocessing.
+    synonyms:
+      - retry
+      - is retry
+      - retry order
+      - reprocess
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+  oscoKafkaReceiveDate:
+    type: datetime
+    description: Timestamp when OSCO received the order event from Kafka.
+    synonyms:
+      - kafka receive date
+      - osco kafka receive date
+      - event received date
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+
+  # Store feature flags from the order snapshot. Use these for store capability questions.
+  storeFlags.isWysiWygEnabled:
+    type: string
+    description: Store flag indicating whether WYSIWYG is enabled. Stored as a string in MongoDB.
+    synonyms:
+      - wysiwyg enabled
+      - isWysiWygEnabled
+      - wysiwyg
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  storeFlags.isCleanReceiptEnabled:
+    type: string
+    description: Store flag indicating whether clean receipt is enabled. Stored as a string in MongoDB.
+    synonyms:
+      - clean receipt enabled
+      - isCleanReceiptEnabled
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  storeFlags.publishPaymentRequested:
+    type: string
+    description: Store flag indicating whether payment-request publishing is enabled. Stored as a string in MongoDB.
+    synonyms:
+      - publish payment requested
+      - payment requested publish flag
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  storeFlags.storeEnabledExpressOrder:
+    type: string
+    description: Store flag indicating whether express order is enabled. Stored as a string in MongoDB.
+    synonyms:
+      - express order enabled
+      - store enabled express order
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  storeFlags.isMfcOosOrder:
+    type: string
+    description: Store flag indicating whether this is an MFC out-of-stock order. Stored as a string in MongoDB.
+    synonyms:
+      - mfc oos order
+      - mfc out of stock order
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+
+  # Order status and lifecycle. Use orderStatus for current business status.
+  orderStatus:
+    type: string
+    description: Current business status of the order.
+    synonyms:
+      - order status
+      - status
+      - current status
+      - order state
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - CREATED
+  orderStatusReasonCode:
+    type: string
+    description: Reason code associated with the current order status.
+    synonyms:
+      - status reason
+      - order status reason
+      - reason code
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+  modifiedReasonCode:
+    type: string
+    description: Business reason code for the most recent order modification.
+    synonyms:
+      - modified reason
+      - modification reason
+      - modified reason code
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+  messageAction:
+    type: string
+    description: Message action that produced or changed the order document.
+    synonyms:
+      - message action
+      - action
+      - create update action
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - CREATE
+  orderCreatedDate:
+    type: datetime
+    description: Business timestamp when the order was created. Prefer this over technical createdDate.
+    synonyms:
+      - order created date
+      - created date
+      - order date
+      - purchase date
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderCancelCutoffDate:
+    type: datetime
+    description: Latest timestamp by which the customer/order can be cancelled.
+    synonyms:
+      - cancel cutoff
+      - cancellation cutoff
+      - order cancel cutoff
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderEditCutoffDate:
+    type: datetime
+    description: Latest timestamp by which the customer/order can be edited.
+    synonyms:
+      - edit cutoff
+      - order edit cutoff
+      - editing cutoff
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+
+  # Order type flags. Use these for 3P/MTO/SNAP/edit-level/special-handoff/auto-replenishment questions.
+  orderType.isAutoReplenishment:
+    type: boolean
+    description: Indicates whether the order is an auto-replenishment order.
+    synonyms:
+      - auto replenishment
+      - auto replenish
+      - subscription replenishment
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  orderType.is3P:
+    type: boolean
+    description: Indicates whether the order is third-party.
+    synonyms:
+      - 3p order
+      - third party order
+      - is3P
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  orderType.isMTO:
+    type: boolean
+    description: Indicates whether the order is made-to-order.
+    synonyms:
+      - mto order
+      - made to order
+      - isMTO
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  orderType.isSnapV2:
+    type: boolean
+    description: Indicates whether the order uses SNAP V2 behavior.
+    synonyms:
+      - snap v2
+      - snap order
+      - isSnapV2
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  orderType.editLevel:
+    type: string
+    description: Edit level allowed for the order.
+    synonyms:
+      - edit level
+      - order edit level
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  orderType.orderSize:
+    type: string
+    description: Order size classification, such as REGULAR.
+    synonyms:
+      - order size
+      - size
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  orderType.specialHandoffNeeded:
+    type: boolean
+    description: Indicates whether special handoff is needed for the order.
+    synonyms:
+      - special handoff
+      - special handoff needed
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+
+  # Source/channel information.
+  sourceInfo.source:
+    type: string
+    description: Source system or channel that created the order.
+    synonyms:
+      - source
+      - order source
+      - source system
+      - channel
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - ECOMMERCE
+  sourceInfo.enteredBy:
+    type: string
+    description: Actor type that entered the order.
+    synonyms:
+      - entered by
+      - order entered by
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  sourceInfo.deviceType:
+    type: string
+    description: Device type used to create the order.
+    synonyms:
+      - device type
+      - device
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  sourceInfo.orderMode:
+    type: string
+    description: Order mode such as online.
+    synonyms:
+      - order mode
+      - mode
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+
+  # Customer identifiers. Return only non-PII customer id by default.
+  customer.customerId:
+    type: string
+    description: Customer account identifier linked to this order. Use this when user asks for orders by customer id/account id.
+    synonyms:
+      - customer id
+      - account id
+      - user id
+      - customer number
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "2345366"
+  customer.customerUUID:
+    type: string
+    description: Customer UUID. Treat as sensitive customer identifier.
+    synonyms:
+      - customer uuid
+      - customer guid
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: true
+    sensitive: true
+    exact_match: true
+  customer.clubCardNumber:
+    type: string
+    description: Club card number. Sensitive customer identifier; do not return by default.
+    synonyms:
+      - club card
+      - club card number
+      - loyalty card
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  customer.memberId:
+    type: string
+    description: Customer member id. Sensitive customer identifier; do not return by default.
+    synonyms:
+      - member id
+      - customer member id
+      - membership id
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: true
+    sensitive: true
+  customer.isSubscription:
+    type: boolean
+    description: Indicates whether the customer/order is subscription related.
+    synonyms:
+      - subscription
+      - subscription order
+      - is subscription
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+
+  # Customer PII. These fields are documented so they can be blocked and stripped.
+  customer.name.firstName:
+    type: string
+    description: Customer first name. PII; do not use for broad lookup or return by default.
+    synonyms:
+      - first name
+      - customer first name
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+  customer.name.lastName:
+    type: string
+    description: Customer last name. PII; do not use for broad lookup or return by default.
+    synonyms:
+      - last name
+      - customer last name
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+  customer.address.addressLine1:
+    type: string
+    description: Customer address line. PII; never return by default.
+    synonyms:
+      - address
+      - customer address
+      - shipping address
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  customer.address.city:
+    type: string
+    description: Customer city from shipping address. PII-adjacent address data; do not return by default.
+    synonyms:
+      - customer city
+      - shipping city
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+  customer.address.state:
+    type: string
+    description: Customer state from shipping address. PII-adjacent address data; do not return by default.
+    synonyms:
+      - customer state
+      - shipping state
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+  customer.address.zipCode:
+    type: string
+    description: Customer ZIP/postal code from shipping address. PII-adjacent; do not return by default.
+    synonyms:
+      - zip code
+      - postal code
+      - shipping zip
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  customer.contact.number:
+    type: string
+    description: Customer phone number. PII; never return by default.
+    synonyms:
+      - phone number
+      - mobile number
+      - contact number
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  customer.contact.type:
+    type: string
+    description: Customer contact type, such as MOBILE. Safe only as metadata, not the contact number itself.
+    synonyms:
+      - contact type
+      - phone type
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  customer.email.id:
+    type: string
+    description: Customer email address. PII; never return by default.
+    synonyms:
+      - email
+      - email address
+      - customer email
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  customer.email._id:
+    type: string
+    description: Customer email address in real MongoDB documents where email array stores the address in _id. PII; never return by default.
+    synonyms:
+      - email
+      - email address
+      - customer email
+      - email id
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  customer.email.type:
+    type: string
+    description: Customer email type, such as PERSONAL.
+    synonyms:
+      - email type
+      - customer email type
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  customer.preference.optIn.type:
+    type: string
+    description: Customer opt-in channel type such as TEXT or EMAIL.
+    synonyms:
+      - opt in type
+      - preference type
+      - communication preference type
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  customer.preference.optIn._id:
+    type: string
+    description: Customer opt-in contact identifier, often a phone number or email. PII; never return by default.
+    synonyms:
+      - opt in id
+      - opt in contact
+      - preference contact id
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  customer.preference.optIn.isOptin:
+    type: boolean
+    description: Indicates whether the customer opted in for a communication preference.
+    synonyms:
+      - opted in
+      - opt in
+      - communication opt in
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+
+  # Money fields safe for operational answers.
+  orderTotal.amount:
+    type: decimal
+    description: Total monetary amount for the order.
+    synonyms:
+      - order total
+      - total amount
+      - order amount
+      - basket total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderTotal.currency:
+    type: string
+    description: Currency for order total amount.
+    synonyms:
+      - currency
+      - order currency
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  orderTotal.itemTotalAmount:
+    type: decimal
+    description: Item subtotal before order-level taxes/fees and after item pricing as stored in the order total.
+    synonyms:
+      - item total
+      - item subtotal
+      - merchandise total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderTotal.itemTotalAfterSavingsAmount:
+    type: decimal
+    description: Item total after savings/discounts.
+    synonyms:
+      - item total after savings
+      - total after savings
+      - discounted item total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderTotal.quotedOrderTotalAmount:
+    type: decimal
+    description: Quoted order total amount before final settlement adjustments.
+    synonyms:
+      - quoted order total
+      - quoted total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderTotal.totalSavings:
+    type: decimal
+    description: Total savings on the order.
+    synonyms:
+      - total savings
+      - savings
+      - discount savings
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderTotal.totalCardSavings:
+    type: decimal
+    description: Total card/loyalty savings on the order.
+    synonyms:
+      - card savings
+      - total card savings
+      - loyalty savings
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderTotal.taxAndFees.totalTaxesAndFeesAmount:
+    type: decimal
+    description: Total taxes and fees amount on the order.
+    synonyms:
+      - taxes and fees
+      - total taxes and fees
+      - tax and fee total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderTotal.totalAllocatedAmount:
+    type: decimal
+    description: Total amount allocated across tenders.
+    synonyms:
+      - total allocated amount
+      - allocated amount
+      - tender allocated total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderTotal.unallocatedAmount:
+    type: decimal
+    description: Amount not allocated to tenders.
+    synonyms:
+      - unallocated amount
+      - unallocated total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderTotal.totalRefundAmount:
+    type: decimal
+    description: Total refunded amount for the order.
+    synonyms:
+      - refund amount
+      - total refund
+      - refunded amount
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderTotal.snapEligibleTotal:
+    type: decimal
+    description: Total SNAP-eligible amount for the order.
+    synonyms:
+      - snap eligible total
+      - ebt eligible total
+      - snap total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderTotal.nonsnapEligibleTotal:
+    type: decimal
+    description: Total non-SNAP-eligible amount for the order.
+    synonyms:
+      - nonsnap eligible total
+      - non snap total
+      - non ebt total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderTotal.totalSnapAmount:
+    type: decimal
+    description: Total SNAP tender amount for the order.
+    synonyms:
+      - total snap amount
+      - snap amount
+      - ebt amount
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderTotal.totalWriteOffAmount:
+    type: decimal
+    description: Total write-off amount for the order.
+    synonyms:
+      - write off amount
+      - total writeoff
+      - write-off total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderTotal.taxAndFees.total:
+    type: decimal
+    description: Total taxes and fees value.
+    synonyms:
+      - tax and fees total
+      - taxes fees total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderTotal.taxAndFees.details.key:
+    type: string
+    description: Tax or fee detail name, such as Sales Tax or Bag Fee.
+    synonyms:
+      - tax fee name
+      - fee name
+      - tax detail
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  orderTotal.taxAndFees.details.value:
+    type: decimal
+    description: Tax or fee detail amount.
+    synonyms:
+      - tax fee amount
+      - fee amount
+      - tax detail amount
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  orderTotal.taxes.type:
+    type: string
+    description: Tax type on the order, such as Sales Tax.
+    synonyms:
+      - tax type
+      - order tax type
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  orderTotal.taxes.amount:
+    type: decimal
+    description: Tax amount for a tax entry.
+    synonyms:
+      - tax amount
+      - order tax amount
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  orderTotal.cardSavings.savingsCategoryName:
+    type: string
+    description: Card savings category name.
+    synonyms:
+      - card savings category
+      - savings category
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  orderTotal.cardSavings.savingsAmount:
+    type: decimal
+    description: Card savings amount for a savings category.
+    synonyms:
+      - card savings amount
+      - savings amount
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  orderTotal.txnLevelSavings.offerId:
+    type: string
+    description: Offer id for transaction-level savings.
+    synonyms:
+      - transaction offer id
+      - basket offer id
+      - savings offer id
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  orderTotal.txnLevelSavings.programCode:
+    type: string
+    description: Program code for transaction-level savings.
+    synonyms:
+      - savings program
+      - program code
+      - promotion program
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+
+  # Payment status can be useful; payment credentials/tokens are sensitive and blocked below.
+  paymentDetails.paymentType:
+    type: string
+    description: Payment type used for the order, such as credit card.
+    synonyms:
+      - payment type
+      - tender type
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  paymentDetails.paymentSubType:
+    type: string
+    description: Payment subtype or network, such as VISA.
+    synonyms:
+      - payment subtype
+      - card type
+      - card network
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  paymentDetails.transactionType:
+    type: string
+    description: Payment transaction type, such as SALE.
+    synonyms:
+      - transaction type
+      - payment transaction type
+      - sale transaction
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  paymentDetails.paymentStatus.status:
+    type: string
+    description: Payment authorization/status value.
+    synonyms:
+      - payment status
+      - authorization status
+      - payment authorization
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - AUTHORIZED
+  paymentDetails.paymentStatus.authorizationCode:
+    type: string
+    description: Payment authorization code. Sensitive operational payment reference; do not return by default.
+    synonyms:
+      - authorization code
+      - auth code
+      - payment authorization code
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: true
+    sensitive: true
+  paymentDetails.paymentStatus.authorizationDate:
+    type: datetime
+    description: Payment authorization timestamp.
+    synonyms:
+      - authorization date
+      - payment authorization date
+      - auth date
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  paymentDetails.paymentStatus.settlementDate:
+    type: datetime
+    description: Payment settlement timestamp.
+    synonyms:
+      - settlement date
+      - payment settlement date
+      - settled date
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  paymentDetails.amount:
+    type: decimal
+    description: Payment amount recorded on the payment detail.
+    synonyms:
+      - payment amount
+      - tender amount
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  paymentDetails.reqAuthorizationAmount:
+    type: decimal
+    description: Requested authorization amount for the payment.
+    synonyms:
+      - requested authorization amount
+      - auth amount
+      - authorization amount
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  paymentDetails.settlementAmount:
+    type: decimal
+    description: Settled amount for the payment.
+    synonyms:
+      - settlement amount
+      - settled amount
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  paymentDetails.cardHolderName:
+    type: string
+    description: Card holder name. PII/payment data; never return by default.
+    synonyms:
+      - card holder
+      - cardholder name
+      - payment name
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  paymentDetails.cardExpiryMonth:
+    type: string
+    description: Payment card expiry month. Sensitive payment data; never return by default.
+    synonyms:
+      - card expiry month
+      - expiry month
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  paymentDetails.cardExpiryYear:
+    type: string
+    description: Payment card expiry year. Sensitive payment data; never return by default.
+    synonyms:
+      - card expiry year
+      - expiry year
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  paymentDetails.zipcode:
+    type: string
+    description: Payment ZIP code. PII/payment address data; never return by default.
+    synonyms:
+      - payment zip
+      - billing zip
+      - card zip
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  paymentDetails.address.zipCode:
+    type: string
+    description: Billing/payment ZIP code nested under payment address. PII/payment address data; never return by default.
+    synonyms:
+      - billing zip
+      - payment address zip
+      - card address zip
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  paymentDetails.tokenNumber:
+    type: string
+    description: Payment token/card token. Sensitive; never return or filter by default.
+    synonyms:
+      - token number
+      - payment token
+      - card token
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+
+  # Tender allocation summary. Token numbers are sensitive; use paymentType/paymentSubType/amount for safe tender questions.
+  tenderAllocationSummary.paymentType:
+    type: string
+    description: Tender allocation payment type, such as CREDITCARD.
+    synonyms:
+      - tender payment type
+      - allocation payment type
+      - tender type
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  tenderAllocationSummary.paymentSubType:
+    type: string
+    description: Tender allocation payment subtype, such as VISA.
+    synonyms:
+      - tender subtype
+      - allocation card type
+      - tender card network
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  tenderAllocationSummary.amount:
+    type: decimal
+    description: Amount allocated to a tender in the order-level tender allocation summary.
+    synonyms:
+      - tender allocation amount
+      - allocated tender amount
+      - tender amount
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  tenderAllocationSummary.data.quotedAmount:
+    type: decimal
+    description: Quoted amount stored on the tender allocation summary.
+    synonyms:
+      - tender quoted amount
+      - allocation quoted amount
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  tenderAllocationSummary.tokenNumber:
+    type: string
+    description: Tender allocation token number. Sensitive payment token; never return or filter by default.
+    synonyms:
+      - tender token
+      - allocation token
+      - payment token
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  paymentDetails.securityCode:
+    type: string
+    description: Card security code. Sensitive payment credential; never return.
+    synonyms:
+      - security code
+      - cvv
+      - cvc
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+
+  # Fulfillment and sub-order fields. Use fulfillmentOrderNumber for fulfillment/sub-order id lookups.
+  subOrders.subOrderNumber:
+    type: integer
+    description: Sub-order number within the order.
+    synonyms:
+      - sub order number
+      - suborder number
+      - sub order id
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  subOrders.subOrderStatus:
+    type: string
+    description: Status of an individual sub-order.
+    synonyms:
+      - sub order status
+      - suborder status
+      - fulfillment status
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.modifiedReasonCode:
+    type: string
+    description: Business reason code for the latest sub-order modification.
+    synonyms:
+      - sub order modified reason
+      - suborder modified reason code
+      - fulfillment modified reason
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.fulfillmentType:
+    type: string
+    description: Fulfillment type for the sub-order, such as DUG.
+    synonyms:
+      - fulfillment type
+      - delivery pickup type
+      - dug
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.fulfillmentOrderNumber:
+    type: string
+    description: Fulfillment order number associated with a sub-order.
+    synonyms:
+      - fulfillment order number
+      - fulfillment order id
+      - sub order fulfillment id
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "23453637601"
+  subOrders.casStatus:
+    type: string
+    description: CAS status for the sub-order.
+    synonyms:
+      - cas status
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.pricingStatus:
+    type: string
+    description: Pricing status for the sub-order, such as COMPLETED.
+    synonyms:
+      - pricing status
+      - sub order pricing status
+      - pricing completed
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.taxInfo.taxCompanyId:
+    type: string
+    description: Tax company id used for sub-order tax calculation.
+    synonyms:
+      - tax company
+      - tax company id
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  subOrders.taxInfo.taxAreaId:
+    type: string
+    description: Tax area id used for sub-order tax calculation.
+    synonyms:
+      - tax area
+      - tax area id
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+
+  # Sub-order type and service-level fields.
+  subOrders.subOrderType.serviceLevel:
+    type: string
+    description: Service level for the sub-order, such as REGULAR.
+    synonyms:
+      - service level
+      - sub order service level
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.subOrderType.isMto:
+    type: boolean
+    description: Indicates whether the sub-order is made-to-order.
+    synonyms:
+      - sub order mto
+      - is mto
+      - made to order suborder
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.subOrderType.isMarketPlace:
+    type: boolean
+    description: Indicates whether the sub-order is marketplace related.
+    synonyms:
+      - marketplace
+      - marketplace order
+      - is marketplace
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.subOrderType.isB2B:
+    type: boolean
+    description: Indicates whether the sub-order is B2B.
+    synonyms:
+      - b2b
+      - business order
+      - is b2b
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.subOrderType.cartCategory:
+    type: string
+    description: Cart category for the sub-order, such as 1P.
+    synonyms:
+      - cart category
+      - sub order cart category
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.deliveryInfo.slotInfo.slotId:
+    type: string
+    description: Delivery or pickup slot id for the sub-order.
+    synonyms:
+      - slot id
+      - delivery slot id
+      - pickup slot id
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.deliveryInfo.slotInfo.startTime:
+    type: datetime
+    description: Delivery or pickup slot start time.
+    synonyms:
+      - slot start time
+      - delivery start time
+      - pickup start time
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  subOrders.deliveryInfo.slotInfo.endTime:
+    type: datetime
+    description: Delivery or pickup slot end time.
+    synonyms:
+      - slot end time
+      - delivery end time
+      - pickup end time
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  subOrders.deliveryInfo.slotInfo.slotPlan:
+    type: string
+    description: Slot plan for delivery/pickup, such as STANDARD.
+    synonyms:
+      - slot plan
+      - delivery slot plan
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.deliveryInfo.slotInfo.slotType:
+    type: string
+    description: Slot type for delivery/pickup, such as ONEHR.
+    synonyms:
+      - slot type
+      - delivery slot type
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.deliveryInfo.slotInfo.timeZone:
+    type: string
+    description: Time zone for the delivery/pickup slot.
+    synonyms:
+      - slot timezone
+      - time zone
+      - delivery timezone
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.deliveryInfo.slotInfo.editingCutoffDate:
+    type: datetime
+    description: Editing cutoff timestamp for the delivery/pickup slot.
+    synonyms:
+      - slot editing cutoff
+      - slot edit cutoff
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  subOrders.deliveryInfo.slotInfo.lastPickupTime:
+    type: datetime
+    description: Last pickup time for the slot.
+    synonyms:
+      - last pickup time
+      - pickup deadline
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  subOrders.deliveryInfo.slotInfo.fulfillmentVendor:
+    type: string
+    description: Fulfillment vendor for the slot.
+    synonyms:
+      - fulfillment vendor
+      - slot fulfillment vendor
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.deliveryInfo.slotInfo.pickerOption:
+    type: string
+    description: Picker option for the delivery/pickup slot.
+    synonyms:
+      - picker option
+      - slot picker option
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.deliveryInfo.pickupInfo.locationId:
+    type: string
+    description: Pickup location id for the sub-order.
+    synonyms:
+      - pickup location
+      - pickup location id
+      - location id
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.deliveryInfo.pickupInfo.locationType:
+    type: string
+    description: Pickup location type, such as STORE.
+    synonyms:
+      - pickup location type
+      - location type
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.deliveryInfo.pickupInfo.shortOrderNumber:
+    type: integer
+    description: Short order number shown for pickup operations.
+    synonyms:
+      - short order number
+      - pickup short order number
+      - short order id
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  subOrders.deliveryInfo.stageByDateTime:
+    type: datetime
+    description: Sub-order stage-by timestamp.
+    synonyms:
+      - stage by time
+      - sub order stage by
+      - stage by date
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  subOrders.deliveryInfo.instructions:
+    type: string
+    description: Customer delivery/pickup instructions. Potentially customer-provided text; do not return by default.
+    synonyms:
+      - delivery instructions
+      - pickup instructions
+      - instructions
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+  subOrders.address.addressLine1:
+    type: string
+    description: Fulfillment ship-from address line. Address data; do not return by default.
+    synonyms:
+      - ship from address
+      - sub order address
+      - fulfillment address
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  subOrders.address.city:
+    type: string
+    description: Fulfillment ship-from city. Address data; do not return by default.
+    synonyms:
+      - ship from city
+      - fulfillment city
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+  subOrders.address.state:
+    type: string
+    description: Fulfillment ship-from state. Address data; do not return by default.
+    synonyms:
+      - ship from state
+      - fulfillment state
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+  subOrders.address.zipCode:
+    type: string
+    description: Fulfillment ship-from ZIP code. Address data; do not return by default.
+    synonyms:
+      - ship from zip
+      - fulfillment zip
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  subOrders.customerService.contact.number:
+    type: string
+    description: Customer service/operations contact number on the sub-order. Phone number; do not return by default.
+    synonyms:
+      - customer service phone
+      - operation phone
+      - dug virtual phone
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  subOrders.customerService.contact.subType:
+    type: string
+    description: Subtype of customer service/operations contact, such as DUG_VIRTUAL_PHONE.
+    synonyms:
+      - customer service contact subtype
+      - operation phone subtype
+      - contact subtype
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  subOrders.routeInfo.vanNumber:
+    type: string
+    description: Van number assigned to route/sub-order.
+    synonyms:
+      - van number
+      - route van
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.routeInfo.stopNumber:
+    type: string
+    description: Stop number assigned to route/sub-order.
+    synonyms:
+      - stop number
+      - route stop
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+
+  # Tote and picking information.
+  subOrders.tote.totalNumberOfBagsUsed:
+    type: integer
+    description: Number of bags used for the sub-order.
+    synonyms:
+      - bags used
+      - bag count
+      - total bags
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  subOrders.tote.totalPickedToteCount:
+    type: integer
+    description: Number of picked totes for the sub-order.
+    synonyms:
+      - picked tote count
+      - tote count
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  subOrders.tote.toteDetails.toteId:
+    type: string
+    description: Tote identifier used during picking.
+    synonyms:
+      - tote id
+      - tote
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.tote.toteDetails.toteTempZone:
+    type: string
+    description: Temperature zone for a tote, such as AM, CH, or frozen.
+    synonyms:
+      - tote temp zone
+      - tote temperature zone
+      - tote zone
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.tote.toteDetails.item.itemId:
+    type: string
+    description: Item id stored inside tote details.
+    synonyms:
+      - tote item id
+      - tote item
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.tote.toteDetails.item.fulfilledUpc.upcId:
+    type: string
+    description: UPC id stored inside tote fulfilled UPC details.
+    synonyms:
+      - tote upc
+      - tote fulfilled upc
+      - tote upc id
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+
+  # Exceptions and line item details.
+  subOrders.exceptions.exceptionCode:
+    type: string
+    description: Exception code recorded on the sub-order.
+    synonyms:
+      - exception code
+      - order exception
+      - sub order exception
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - PRICING_UNAVAILABLE
+  subOrders.exceptions.exceptionMessage:
+    type: string
+    description: Exception message recorded on the sub-order.
+    synonyms:
+      - exception message
+      - exception detail
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: false
+  subOrders.orderLines.itemId:
+    type: string
+    description: Item id on an order line. Use this for item/SKU/product lookup within the order document.
+    synonyms:
+      - item id
+      - sku
+      - product id
+      - order line item
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "289052285"
+  subOrders.orderLines.itemDescription:
+    type: string
+    description: Human-readable item description on an order line.
+    synonyms:
+      - item description
+      - product description
+      - product name
+    searchable: true
+    filterable: false
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.orderedQuantity:
+    type: decimal
+    description: Quantity ordered for an item line.
+    synonyms:
+      - ordered quantity
+      - order quantity
+      - qty ordered
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.fulfilledQuantity:
+    type: decimal
+    description: Quantity fulfilled for an item line.
+    synonyms:
+      - fulfilled quantity
+      - picked quantity
+      - quantity fulfilled
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.shortedQuantity:
+    type: decimal
+    description: Quantity shorted for an item line.
+    synonyms:
+      - shorted quantity
+      - shortage quantity
+      - short quantity
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.lineFulfillmentSystem:
+    type: string
+    description: Fulfillment system for the individual order line.
+    synonyms:
+      - line fulfillment system
+      - item fulfillment system
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.lineId:
+    type: string
+    description: Line id for the order line. Often same as item id.
+    synonyms:
+      - line id
+      - order line id
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.unitOfMeasure:
+    type: string
+    description: Unit of measure for the ordered item.
+    synonyms:
+      - unit of measure
+      - uom
+      - item uom
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.unitPrice.amount:
+    type: decimal
+    description: Unit price amount for the order line.
+    synonyms:
+      - unit price
+      - item unit price
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.totalItemPrice:
+    type: decimal
+    description: Total item price for the order line.
+    synonyms:
+      - total item price
+      - line total
+      - item line total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.substitutionCode:
+    type: string
+    description: Substitution preference/code for the order line.
+    synonyms:
+      - substitution code
+      - substitution preference
+      - substitute code
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.substitutionValue:
+    type: string
+    description: Human-readable substitution preference for the order line.
+    synonyms:
+      - substitution value
+      - substitution text
+      - substitute preference
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.smicCode:
+    type: string
+    description: SMIC code for the order line item.
+    synonyms:
+      - smic
+      - smic code
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  subOrders.orderLines.department._id:
+    type: string
+    description: Department id for the order line item.
+    synonyms:
+      - department id
+      - item department id
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.department.name:
+    type: string
+    description: Department name for the order line item.
+    synonyms:
+      - department
+      - department name
+      - item department
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.aisle.name:
+    type: string
+    description: Aisle name for the order line item.
+    synonyms:
+      - aisle
+      - aisle name
+      - item aisle
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.shelf.name:
+    type: string
+    description: Shelf name for the order line item.
+    synonyms:
+      - shelf
+      - shelf name
+      - item shelf
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.containsAlcohol:
+    type: boolean
+    description: Indicates whether the item line contains alcohol.
+    synonyms:
+      - contains alcohol
+      - alcohol item
+      - alcoholic item
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.isRegulatedItem:
+    type: boolean
+    description: Indicates whether the order line is a regulated item.
+    synonyms:
+      - regulated item
+      - is regulated
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.isReplenishItem:
+    type: boolean
+    description: Indicates whether the order line is a replenishment item.
+    synonyms:
+      - replenish item
+      - replenishment item
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.isArProduct:
+    type: boolean
+    description: Indicates whether the order line is an auto-replenishment product.
+    synonyms:
+      - ar product
+      - auto replenishment product
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.fulfilledUpc.upcId:
+    type: string
+    description: Fulfilled UPC id for an order-line item.
+    synonyms:
+      - upc
+      - upc id
+      - fulfilled upc
+      - scanned upc
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+  subOrders.orderLines.fulfilledUpc.pickedBy:
+    type: string
+    description: User/system that picked the UPC. Operational identifier; do not return by default.
+    synonyms:
+      - picked by
+      - picker
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  subOrders.orderLines.fulfilledUpc.pickedDate:
+    type: datetime
+    description: Timestamp when the UPC/item was picked.
+    synonyms:
+      - picked date
+      - item picked date
+      - pick time
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.fulfilledUpc.scannedUpc:
+    type: string
+    description: UPC value scanned during picking.
+    synonyms:
+      - scanned upc
+      - scan upc
+      - picked upc
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.fulfilledUpc.isSubstituted:
+    type: boolean
+    description: Indicates whether the fulfilled UPC was a substitution.
+    synonyms:
+      - substituted
+      - is substituted
+      - substituted item
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.fulfilledUpc.pickType:
+    type: string
+    description: Pick type for the fulfilled UPC.
+    synonyms:
+      - pick type
+      - picking type
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.fulfilledUpc.itemPrice.snapEligible:
+    type: boolean
+    description: Indicates whether the fulfilled item price is SNAP eligible.
+    synonyms:
+      - snap eligible
+      - snap item
+      - ebt eligible
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.orderLines.fulfilledUpc.tenderAllocations.amount:
+    type: decimal
+    description: Tender amount allocated to a fulfilled UPC/item.
+    synonyms:
+      - item tender amount
+      - fulfilled upc tender amount
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  subOrders.orderLines.fulfilledUpc.tenderAllocations.tokenNumber:
+    type: string
+    description: Payment token allocated to a fulfilled UPC/item. Sensitive; never return.
+    synonyms:
+      - fulfilled upc tender token
+      - item payment token
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  subOrders.orderLines.tenderAllocations.amount:
+    type: decimal
+    description: Tender amount allocated to an order line.
+    synonyms:
+      - line tender amount
+      - order line tender amount
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  subOrders.orderLines.tenderAllocations.tokenNumber:
+    type: string
+    description: Payment token allocated to an order line. Sensitive; never return.
+    synonyms:
+      - order line tender token
+      - line payment token
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  subOrders.charges.tenderAllocations.amount:
+    type: decimal
+    description: Tender amount allocated to a sub-order charge.
+    synonyms:
+      - charge tender amount
+      - fee tender amount
+      - charge allocation amount
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  subOrders.charges.tenderAllocations.tokenNumber:
+    type: string
+    description: Payment token allocated to a sub-order charge. Sensitive; never return.
+    synonyms:
+      - charge tender token
+      - fee payment token
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  subOrders.charges.name:
+    type: string
+    description: Charge name on a sub-order, such as BagFee or Minimum order fee.
+    synonyms:
+      - charge name
+      - fee name
+      - service fee name
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.charges.category:
+    type: string
+    description: Charge category on a sub-order, such as ServiceFee.
+    synonyms:
+      - charge category
+      - fee category
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  subOrders.charges.chargeAmount.amount:
+    type: decimal
+    description: Amount for a sub-order charge.
+    synonyms:
+      - charge amount
+      - fee amount
+      - service fee amount
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  subOrders.charges.tax.total:
+    type: decimal
+    description: Total tax amount applied to a sub-order charge.
+    synonyms:
+      - charge tax
+      - fee tax
+      - charge tax total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+
+  # Store info key/value array and order info metadata.
+  storeInfo.key:
+    type: string
+    description: Store info key from the order snapshot, such as isMFC, terminalNumber, or storeTimeZone.
+    synonyms:
+      - store info key
+      - store setting
+      - store attribute
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  storeInfo.value:
+    type: string
+    description: Store info value paired with storeInfo.key.
+    synonyms:
+      - store info value
+      - store setting value
+      - store attribute value
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  orderInfo.stageByDateTime:
+    type: datetime
+    description: Order-level stage-by timestamp.
+    synonyms:
+      - order stage by
+      - stage by date time
+      - stage by datetime
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+  orderInfo.isExceptionEnabled:
+    type: boolean
+    description: Indicates whether exception handling is enabled for the order.
+    synonyms:
+      - exception enabled
+      - is exception enabled
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  orderInfo.data.isPickupStore:
+    type: string
+    description: Order info flag indicating whether the store is a pickup store. Stored as a key/value string.
+    synonyms:
+      - pickup store
+      - is pickup store
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  orderInfo.data.pickupLocations:
+    type: string
+    description: Pickup locations value from orderInfo data.
+    synonyms:
+      - pickup locations
+      - pickup location list
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  orderInfo.receiptMessage.printLine:
+    type: string
+    description: Receipt message print line. Not useful for filtering; return only when explicitly requested.
+    synonyms:
+      - receipt message
+      - receipt print line
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: false
+
+  # Audit, external order, and receipt fields. Use auditLog event names for lifecycle timing questions.
+  audit.createDate:
+    type: datetime
+    description: Audit create timestamp. Prefer orderCreatedDate for business order creation questions.
+    synonyms:
+      - audit create date
+      - audit created date
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  audit.modifiedDate:
+    type: datetime
+    description: Audit modified timestamp.
+    synonyms:
+      - audit modified date
+      - audit updated date
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  audit.createdBy:
+    type: string
+    description: System/source that created the order audit record.
+    synonyms:
+      - audit created by
+      - created by system
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  audit.modifiedBy:
+    type: string
+    description: System/source that last modified the order audit record.
+    synonyms:
+      - audit modified by
+      - modified by system
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  audit.auditLog.FFO_CREATED:
+    type: datetime
+    description: Audit timestamp when FFO_CREATED occurred.
+    synonyms:
+      - ffo created
+      - order ffo created
+      - fulfillment created time
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  audit.auditLog.FFO_RELEASED:
+    type: datetime
+    description: Audit timestamp when FFO_RELEASED occurred.
+    synonyms:
+      - ffo released
+      - order released
+      - fulfillment released time
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  audit.auditLog.FFO_PICK_START:
+    type: datetime
+    description: Audit timestamp when picking started.
+    synonyms:
+      - pick start
+      - picking started
+      - ffo pick start
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  audit.auditLog.RECORD_PICK_DETAILS:
+    type: datetime
+    description: Audit timestamp when pick details were recorded.
+    synonyms:
+      - record pick details
+      - pick details recorded
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  audit.auditLog.PAYMENT_REQUESTED:
+    type: datetime
+    description: Audit timestamp when payment was requested.
+    synonyms:
+      - payment requested
+      - payment requested time
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  audit.auditLog.PAYMENT_COMPLETED:
+    type: datetime
+    description: Audit timestamp when payment completed.
+    synonyms:
+      - payment completed
+      - payment completed time
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  audit.auditLog.UPDATE_FINAL_PRICE:
+    type: datetime
+    description: Audit timestamp when final price was updated.
+    synonyms:
+      - update final price
+      - final price updated
+      - final pricing update
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  audit.auditLog.RECEIPT_GENERATED:
+    type: datetime
+    description: Audit timestamp when receipt was generated.
+    synonyms:
+      - receipt generated
+      - receipt generated time
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  audit.auditLog.FFO_DELIVERY_CREATED:
+    type: datetime
+    description: Audit timestamp when FFO delivery was created.
+    synonyms:
+      - ffo delivery created
+      - delivery created
+      - fulfillment delivery created
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  audit.auditLog.FFO_PICKUP_READY:
+    type: datetime
+    description: Audit timestamp when the order became pickup ready.
+    synonyms:
+      - pickup ready
+      - ffo pickup ready
+      - ready for pickup
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  audit.auditLog.FFO_PICKED_UP:
+    type: datetime
+    description: Audit timestamp when the order was picked up.
+    synonyms:
+      - picked up
+      - ffo picked up
+      - pickup complete
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  externalOrder.orderReference:
+    type: string
+    description: External order reference from a marketplace/third-party source when present.
+    synonyms:
+      - external order reference
+      - external order id
+      - marketplace order reference
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+  externalOrder.source:
+    type: string
+    description: External order source, such as Doordash, when present.
+    synonyms:
+      - external order source
+      - marketplace source
+      - third party source
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+  receiptInfo.timeStamp:
+    type: datetime
+    description: Timestamp when receipt information was generated.
+    synonyms:
+      - receipt timestamp
+      - receipt time
+      - receipt generated time
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  receiptInfo.source:
+    type: string
+    description: Receipt source system, such as DTILL.
+    synonyms:
+      - receipt source
+      - receipt system
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+  receiptInfo.cleanReceiptUri:
+    type: string
+    description: Clean receipt URI. Internal URL; do not return by default.
+    synonyms:
+      - clean receipt uri
+      - clean receipt url
+      - receipt url
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: false
+    sensitive: true
+  receiptInfo.pdfReceiptUrl:
+    type: string
+    description: PDF receipt URL. Internal URL; do not return by default.
+    synonyms:
+      - pdf receipt url
+      - receipt pdf
+    searchable: false
+    filterable: false
+    return_by_default: false
+    pii: false
+    sensitive: true
+sample_queries:
+  - user_request: find order 234536376
+    target:
+      database: osco
+      collection: order
+      filter:
+        orderNumber: "234536376"
+  - user_request: show orders for store 0177
+    target:
+      database: osco
+      collection: order
+      filter:
+        storeNumber: "0177"
+  - user_request: find order by fulfillment order number 23453637601
+    target:
+      database: osco
+      collection: order
+      filter:
+        subOrders.fulfillmentOrderNumber: "23453637601"
+  - user_request: show orders for customer id 2345366
+    target:
+      database: osco
+      collection: order
+      filter:
+        customer.customerId: "2345366"
+  - user_request: find orders with exception PRICING_UNAVAILABLE
+    target:
+      database: osco
+      collection: order
+      filter:
+        subOrders.exceptions.exceptionCode: PRICING_UNAVAILABLE

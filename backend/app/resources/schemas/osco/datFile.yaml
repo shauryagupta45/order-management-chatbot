@@ -1,0 +1,28 @@
+database: osco
+collection: datFile
+display_name: DAT File
+description: Starter schema for the osco.datFile collection.
+business_context:
+  primary_entity: dat file
+  common_user_phrases:
+    - dat file
+    - datFile
+  when_to_use: Use for questions specifically about OSCO DAT file records.
+aliases:
+  - dat file
+  - datFile
+identity:
+  primary_key: _id
+default_limit: 10
+fields:
+  _id:
+    type: objectId
+    description: MongoDB internal document id.
+    synonyms:
+      - mongo id
+      - document id
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+
