@@ -1,28 +1,2755 @@
 database: osco
 collection: pricingData
 display_name: Pricing Data
-description: Starter schema for the osco.pricingData collection.
+description: >-
+  OSCO pricing request/response audit record. One document per order, storing the full payload OSCO sent to the
+  pricing service (pricingRequest) alongside the priced result it received back (pricingResponse). The response
+  side is authoritative and carries the final money figures - item prices, per-item tax, fees/charges, savings,
+  transaction totals, and how the total was split across payment tenders (fundsAllocation). Use this collection
+  for order pricing, tax, fee, savings, SNAP/EBT eligibility, and payment-split questions, and to compare what
+  was requested against what was priced.
 business_context:
   primary_entity: pricing data
   common_user_phrases:
-    - pricing data
-    - pricingData
-  when_to_use: Use for questions specifically about OSCO pricing data records.
+    - pricing for order
+    - pricing data for order
+    - what was the total for order
+    - order total
+    - final total for order
+    - how much tax was charged
+    - tax breakdown for order
+    - delivery fee for order
+    - fees charged on order
+    - minimum order fee
+    - what did the customer pay
+    - payment split for order
+    - how was the order paid
+    - tender allocation for order
+    - savings on order
+    - offers applied to order
+    - promo code savings
+    - item prices for order
+    - price of item on order
+    - snap eligible total
+    - is the order snap
+    - ebt order pricing
+    - direct spend allocation
+    - banner cash on order
+    - write off amount
+    - refund amount on order
+    - pricing request vs response
+    - was this a price check
+    - tax area for order
+  when_to_use: >-
+    Use this collection for order pricing and money questions - final and pre-tax totals, per-item pricing and
+    tax, delivery/service fees, savings and offers, SNAP and EBT eligibility totals, funds allocation across
+    payment tenders, and payment types used. Also use it to diff the pricing request against the pricing
+    response when a total looks wrong. Look records up by orderNumber.
+  when_not_to_use: >-
+    Do not use for order status, fulfillment, delivery slot, or customer profile questions - those live on the
+    osco.order collection, which also holds its own payment status and order line data. This collection is a
+    pricing service audit snapshot, so its figures reflect the moment pricing ran and may differ from the
+    order's current state. Do not use it for substitution approvals (see osco.sub_future_preference) or for
+    the order event timeline (see osco.events).
 aliases:
-  - pricing data
   - pricingData
+  - pricing data
+  - pricing
+  - pricing record
+  - pricing request
+  - pricing response
+  - order pricing
+  - order total
+  - order totals
+  - tax
+  - tax breakdown
+  - fees
+  - charges
+  - tender allocation
+  - funds allocation
+  - payment split
+  - savings
 identity:
   primary_key: _id
-default_limit: 10
+  business_keys:
+    - orderNumber
+    - pricingResponse.transactionNumber
+default_sort:
+  field: pricingResponse.transactionTimestamp
+  direction: desc
+default_limit: 5
 fields:
+  # ==========================================================================================
+  # READ THIS BEFORE QUERYING - this collection has several traps.
+  #
+  # 1. REQUEST vs RESPONSE. The document mirrors most fields under both pricingRequest (what was
+  #    sent) and pricingResponse (what came back). pricingResponse is AUTHORITATIVE for money.
+  #    Only use pricingRequest fields when the user explicitly asks what was requested/sent, or
+  #    when diffing the two.
+  #
+  # 2. MONEY IS STORED AS STRINGS. Almost every amount is a decimal string such as "11.95", not a
+  #    number. Filter with quoted values. Numeric range operators compare lexicographically and
+  #    are UNRELIABLE ("10.00" sorts before "6.99"), so for "orders over $X" style questions,
+  #    return the values and compare after retrieval rather than filtering with $gt/$lt.
+  #    The one exception is pricingResponse.tax.total, which is a real number.
+  #
+  # 3. WHICH TOTAL TO USE. In the sample record:
+  #      transactionTotal = originalTransactionTotal = "6.38"  (item subtotal before tax and fees)
+  #      totalTax = "16.29"                                    (tax PLUS fees - see note 4)
+  #      finalTransactionTotal = "22.67"                       (6.38 + 16.29)
+  #      fundsAllocation.totalAllocatedAmount = "22.67"        (matches, and the tenders sum to it)
+  #    For "what did the customer pay" or "order total", use finalTransactionTotal, NOT
+  #    transactionTotal. Cross-check against fundsAllocation.totalAllocatedAmount.
+  #
+  # 4. totalTax IS NOT PURELY TAX. In the sample, pricingResponse.tax.details lists
+  #    "Sales Tax" 0.39, "Delivery Fee" 11.95, and "Minimum Order Fee (under $30)" 3.95, which sum
+  #    to the 16.29 reported as totalTax. So fees are folded into the tax total. For actual sales
+  #    tax, read the "Sales Tax" entry in pricingResponse.tax.details or sum the per-item
+  #    pricingResponse.items.tax.total values. Never report totalTax as the sales tax figure.
+  #
+  # 5. tax.details HAS TWO INCOMPATIBLE SHAPES. At transaction level
+  #    (pricingResponse.tax.details) it is an ARRAY of {key, value} objects. At item and charge
+  #    level (pricingResponse.items.tax.details, pricingResponse.charges.tax.details) it is an
+  #    OBJECT MAP keyed by tax name, e.g. {"Sales Tax": "0.15"}. Likewise tax.total is a NUMBER at
+  #    transaction level but a STRING at item and charge level.
+  #
+  # 6. storeNumber DIFFERS BETWEEN REQUEST AND RESPONSE IN THE SAME DOCUMENT.
+  #    pricingRequest.storeNumber is "177" (unpadded); pricingResponse.storeNumber is "0177"
+  #    (zero padded to four). Filter each with its own form, or use $or across both.
+  #
+  # 7. transactionTimestamp HAS DIFFERENT TYPES. pricingRequest.transactionTimestamp is epoch
+  #    milliseconds ($numberLong); pricingResponse.transactionTimestamp is a real BSON date. Use
+  #    the response field for all date filtering and sorting.
+  #
+  # 8. ARRAY ELEMENTS CANNOT BE ISOLATED. $elemMatch is not an allowed operator here, so a filter
+  #    on an items.* / charges.* / addresses.* path matches the DOCUMENT if ANY element matches -
+  #    it does not tell you which element matched, and two conditions on the same array may be
+  #    satisfied by different elements. This matters most for addresses, which contains both a
+  #    STORE and a CUSTOMER entry: a filter on addresses.state may match either one. Retrieve and
+  #    inspect the elements instead of trying to filter within one.
+  #
+  # 9. PAYMENT TOKENS ARE SENSITIVE. Every tokenNumber path is a payment token and is neither
+  #    filterable nor returnable. Answer payment questions with paymentType / paymentSubType /
+  #    amount instead.
+  #
+  # 10. SPARSE AND TYPE-DRIFTING ITEM FIELDS. Some item fields appear on only some elements (for
+  #     example salesUnitNbr), and alcoholVolumePct is a string in the request but a number in the
+  #     response. Do not assume a field is present on every item.
+  # ==========================================================================================
+
+  # ---------- Document identity ----------
   _id:
     type: objectId
-    description: MongoDB internal document id.
+    description: MongoDB internal document id. Use only when the user explicitly provides a Mongo document id/ObjectId.
     synonyms:
       - mongo id
       - document id
+      - object id
+      - _id
     searchable: true
     filterable: true
+    sortable: false
     return_by_default: true
     pii: false
+    exact_match: true
+    examples:
+      - 66b56d6953fc255cb8247539
+  orderNumber:
+    type: string
+    description: >-
+      Customer order number this pricing record belongs to. This is the top level lookup key for the collection
+      and the field to prefer whenever the user names an order. Same identifier as orderNumber on osco.order.
+      Stored as a string, so quote the value when filtering.
+    synonyms:
+      - order number
+      - order no
+      - order id
+      - customer order id
+      - transaction number
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "70470889"
 
+  # ---------- pricingRequest: identity and context ----------
+  pricingRequest.transactionNumber:
+    type: string
+    description: Transaction number on the pricing request. Mirrors the top level orderNumber; prefer orderNumber for lookups.
+    synonyms:
+      - request transaction number
+      - pricing request transaction number
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - "70470889"
+  pricingRequest.memberId:
+    type: string
+    description: >-
+      Loyalty member id sent on the pricing request. Sensitive customer identifier - filter by it when the user
+      supplies a member id, but do not return it.
+    synonyms:
+      - member id
+      - loyalty id
+      - membership id
+      - member number
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+    exact_match: true
+  pricingRequest.guid:
+    type: string
+    description: >-
+      Customer guid sent on the pricing request, in the hyphenated form used by customer ids elsewhere in OSCO
+      (for example the customerId on osco.ccpa_audit_rits). Sensitive customer identifier - filterable but not
+      returned.
+    synonyms:
+      - guid
+      - customer guid
+      - customer id
+      - customer identifier
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+    exact_match: true
+  pricingRequest.storeNumber:
+    type: string
+    description: >-
+      Store number as sent on the pricing request. NOT zero padded in the sample record ("177"), unlike
+      pricingResponse.storeNumber ("0177") in the same document and storeId on osco.store. When filtering by
+      store, try the unpadded form here and the padded form on the response, or match both with $or.
+    synonyms:
+      - request store number
+      - store number
+      - store
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - "177"
+  pricingRequest.storeTimeZone:
+    type: string
+    description: IANA time zone of the store used for pricing. Use this to interpret transaction timestamps in store-local time.
+    synonyms:
+      - store time zone
+      - timezone
+      - time zone
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - America/Denver
+  pricingRequest.terminalNumber:
+    type: string
+    description: Virtual POS terminal number used for the pricing transaction. Technical value; 99 denotes the online/ecommerce terminal in the sample.
+    synonyms:
+      - terminal number
+      - terminal
+      - pos terminal
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - "99"
+  pricingRequest.cartCategory:
+    type: string
+    description: >-
+      Cart category sent for pricing. 1P denotes a first party cart. Same value domain as
+      subOrders.subOrderType.cartCategory on osco.order.
+    synonyms:
+      - cart category
+      - cart type
+      - 1p
+      - 3p
+      - marketplace cart
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - 1P
+  pricingRequest.fulfillmentType:
+    type: string
+    description: >-
+      Fulfillment type the order was priced for, such as DELIVERY or DUG. Drives which fees apply, so use it
+      when explaining a delivery fee. Only present on the request side.
+    synonyms:
+      - fulfillment type
+      - delivery type
+      - delivery or pickup
+      - dug
+      - delivery
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - DELIVERY
+  pricingRequest.banner:
+    type: string
+    description: >-
+      Retail banner used for pricing. Note the mixed case value "Albertsons" here, whereas osco.store stores
+      banners uppercase (for example SAFEWAY) - match case insensitively when joining the two.
+    synonyms:
+      - banner
+      - retail banner
+      - brand
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    allow_regex: true
+    examples:
+      - Albertsons
+  pricingRequest.transactionTimestamp:
+    type: long
+    description: >-
+      Transaction timestamp on the request, stored as epoch MILLISECONDS ($numberLong), not a date. Date range
+      filters written as ISO strings will not match. Use pricingResponse.transactionTimestamp for any date
+      filtering or sorting.
+    synonyms:
+      - request transaction timestamp
+      - request timestamp
+      - epoch timestamp
+    searchable: false
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+    examples:
+      - 1723166057146
+
+  # ---------- pricingRequest: SNAP/EBT eligibility and flags ----------
+  pricingRequest.isSnap:
+    type: boolean
+    description: Whether the transaction was submitted as a SNAP (food stamp) transaction. Genuine boolean - filter with true/false unquoted.
+    synonyms:
+      - is snap
+      - snap
+      - food stamp
+      - snap transaction
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - false
+  pricingRequest.isEBTCash:
+    type: boolean
+    description: Whether the transaction used EBT cash tender. Genuine boolean.
+    synonyms:
+      - is ebt cash
+      - ebt cash
+      - ebt
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - false
+  pricingRequest.snapEligibleTotal:
+    type: string
+    description: >-
+      Total value of SNAP eligible items sent for pricing, as a decimal string. In the sample this equals the
+      item subtotal and the response's transactionTotal ("6.38"). String typed, so avoid numeric range filters.
+    synonyms:
+      - snap eligible total
+      - snap total
+      - snap eligible amount
+      - food stamp eligible total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "6.38"
+  pricingRequest.nonSnapEligibleTotal:
+    type: string
+    description: >-
+      Total value of non SNAP eligible amounts sent for pricing, as a decimal string. In the sample this equals
+      the response's totalTax ("16.29"), i.e. the tax and fees portion.
+    synonyms:
+      - non snap eligible total
+      - non snap total
+      - ineligible total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "16.29"
+  pricingRequest.isAutoReplenishment:
+    type: boolean
+    description: >-
+      Whether the order is an auto-replenishment order. Genuine boolean here, unlike the string "false" carried
+      in eventData on osco.events.
+    synonyms:
+      - auto replenishment
+      - auto replenish
+      - subscription order
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - false
+  pricingRequest.taxType:
+    type: string
+    description: Tax treatment requested for the transaction. SALE is the observed value.
+    synonyms:
+      - tax type
+      - tax treatment
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - SALE
+  pricingRequest.enableTax:
+    type: boolean
+    description: Whether tax calculation was enabled for this pricing call. If false, tax figures on the response will be zero or absent.
+    synonyms:
+      - enable tax
+      - tax enabled
+      - was tax calculated
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - true
+  pricingRequest.isExceptionEnabled:
+    type: boolean
+    description: Whether pricing exception handling was enabled for this call. Technical pricing service flag.
+    synonyms:
+      - is exception enabled
+      - exception enabled
+      - pricing exception flag
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - true
+  pricingRequest.isPriceCheck:
+    type: boolean
+    description: >-
+      Whether this call was a price check (a quote) rather than a real priced transaction. Use this to exclude
+      quotes when the user asks about actual order charges - a price check does not represent money taken.
+    synonyms:
+      - is price check
+      - price check
+      - quote only
+      - was it a quote
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - false
+
+  # ---------- pricingRequest: items (core comparison fields only) ----------
+  # Full per-item detail is declared on the response side, which mirrors these keys. Use the request
+  # item fields only to diff what was sent against what was priced.
+  pricingRequest.items.itemCode:
+    type: string
+    description: Item code (UPC form) of an item sent for pricing. Use the response side for priced item questions; use this only when diffing request against response.
+    synonyms:
+      - request item code
+      - requested item code
+      - requested upc
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    allow_regex: true
+    examples:
+      - "0002113007010"
+  pricingRequest.items.entryId:
+    type: integer
+    description: Entry id of an item line on the request. Integer, unlike the string entry ids seen elsewhere in OSCO.
+    synonyms:
+      - request entry id
+      - requested entry id
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - 5001
+  pricingRequest.items.qty:
+    type: integer
+    description: Quantity of an item as sent for pricing. Genuine integer here, unlike the string quantities on osco.sub_future_preference.
+    synonyms:
+      - request quantity
+      - requested qty
+      - requested quantity
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - 1
+  pricingRequest.items.unitPrice:
+    type: string
+    description: Unit price of an item as sent for pricing, as a decimal string. Compare against the response unit price to detect repricing.
+    synonyms:
+      - request unit price
+      - requested unit price
+      - submitted price
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "2.39"
+  pricingRequest.items.netItemPrice:
+    type: string
+    description: Net item price as sent for pricing, as a decimal string.
+    synonyms:
+      - request net item price
+      - requested net price
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "2.39"
+  pricingRequest.items.description:
+    type: string
+    description: Item description as sent for pricing. Prefer the response side for item name searches.
+    synonyms:
+      - request item description
+      - requested item name
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    allow_regex: true
+  pricingRequest.items.isSnapEligible:
+    type: boolean
+    description: Whether an item was flagged SNAP eligible on the request. Genuine boolean.
+    synonyms:
+      - request snap eligible
+      - requested snap eligible
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - true
+  pricingRequest.items.substituted:
+    type: boolean
+    description: Whether an item was marked as substituted on the request. For substitution detail use the osco.sub_future_preference collection.
+    synonyms:
+      - request substituted
+      - was it substituted
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - false
+  pricingRequest.items.originalEntryId:
+    type: integer
+    description: Original entry id the request item maps back to on the customer's cart.
+    synonyms:
+      - request original entry id
+      - original entry id
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - 1
+
+  # ---------- pricingRequest: transaction level savings and offers ----------
+  pricingRequest.txnLevelSavings.offerId:
+    type: string
+    description: >-
+      Internal offer id applied at transaction level. Use this for "which offers were applied to the order"
+      questions. Note the offers live on the request side; the response reports the resulting totalSavings.
+    synonyms:
+      - offer id
+      - offer
+      - promotion id
+      - deal id
+      - transaction level offer
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "90120515"
+  pricingRequest.txnLevelSavings.externalOfferId:
+    type: string
+    description: External/partner offer id for a transaction level offer, typically the internal offer id with a suffix such as -ND.
+    synonyms:
+      - external offer id
+      - partner offer id
+      - external promotion id
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    allow_regex: true
+    examples:
+      - 90120515-ND
+  pricingRequest.txnLevelSavings.discountQty:
+    type: integer
+    description: Number of units the transaction level offer discounts.
+    synonyms:
+      - discount quantity
+      - discount qty
+      - offer quantity
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - 1
+  pricingRequest.txnLevelSavings.calculateUsage:
+    type: boolean
+    description: Whether offer usage should be counted against the customer's limit for this transaction level offer.
+    synonyms:
+      - calculate usage
+      - count usage
+      - offer usage flag
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - false
+  pricingRequest.txnLevelSavings.clipIds:
+    type: string
+    description: >-
+      Clip ids tying the offer to the customer's clipped coupons. An array of strings that may be empty, and
+      may contain the sentinel value "No Limit" instead of a real id, so do not treat entries as identifiers
+      without checking.
+    synonyms:
+      - clip ids
+      - clip id
+      - coupon clip
+      - clipped coupon
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - No Limit
+  pricingRequest.promoCodeSavings:
+    type: array
+    description: >-
+      Promo code savings applied to the transaction. Empty in the sample record, so its element structure is
+      unknown - check for a non-empty array before reporting promo code savings, and do not assume field names
+      inside it.
+    synonyms:
+      - promo code savings
+      - promo code
+      - promotion code
+      - coupon code
+      - discount code
+    searchable: false
+    filterable: false
+    sortable: false
+    return_by_default: false
+    pii: false
+
+  # ---------- pricingRequest: charges and tender as submitted ----------
+  pricingRequest.charges.displayName:
+    type: string
+    description: Display name of a fee/charge as submitted for pricing. Use the response side for the charged amounts.
+    synonyms:
+      - request charge name
+      - submitted fee name
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    allow_regex: true
+  pricingRequest.charges.category:
+    type: string
+    description: Category of a fee/charge as submitted, such as shipping or service.
+    synonyms:
+      - request charge category
+      - submitted fee category
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+  pricingRequest.charges.salesPrice:
+    type: string
+    description: Sales price of a fee/charge as submitted, as a decimal string. Compare with the response salesPrice to spot fee changes during pricing.
+    synonyms:
+      - request charge amount
+      - submitted fee amount
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+  pricingRequest.tenderAllocationSummary.tokenNumber:
+    type: string
+    description: Payment token on the requested tender allocation. Sensitive payment token; never return or filter by it.
+    synonyms:
+      - request tender token
+      - payment token
+    searchable: false
+    filterable: false
+    sortable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  pricingRequest.tenderAllocationSummary.paymentType:
+    type: string
+    description: Payment type on the requested tender allocation, such as CREDITCARD or DIRECTSPEND.
+    synonyms:
+      - request payment type
+      - submitted payment type
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+  pricingRequest.tenderAllocationSummary.paymentSubType:
+    type: string
+    description: Payment sub type on the requested tender allocation, such as VISA or SODA_HEALTH.
+    synonyms:
+      - request payment sub type
+      - submitted card type
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+  pricingRequest.tenderAllocationSummary.amount:
+    type: string
+    description: >-
+      Amount allocated to a tender on the request, as a decimal string. Note the request and response can
+      differ in formatting for the same tender ("15.9" on the request vs "15.90" on the response), so compare
+      them numerically after retrieval, not as strings.
+    synonyms:
+      - request tender amount
+      - submitted tender amount
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "15.9"
+
+  # ---------- pricingResponse: identity and context (authoritative side) ----------
+  pricingResponse.transactionNumber:
+    type: string
+    description: Transaction number on the pricing response. Mirrors the top level orderNumber; prefer orderNumber for lookups.
+    synonyms:
+      - response transaction number
+      - pricing response transaction number
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - "70470889"
+  pricingResponse.memberId:
+    type: string
+    description: Loyalty member id echoed on the pricing response. Sensitive customer identifier - filterable but not returned.
+    synonyms:
+      - member id
+      - loyalty id
+      - membership id
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+    exact_match: true
+  pricingResponse.storeNumber:
+    type: string
+    description: >-
+      Store number on the pricing response, zero padded to four characters ("0177") and therefore matching
+      storeId on osco.store. Note pricingRequest.storeNumber in the same document is unpadded ("177"), so a
+      store filter should target the correct side or cover both with $or.
+    synonyms:
+      - store number
+      - store id
+      - store
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "0177"
+  pricingResponse.storeTimeZone:
+    type: string
+    description: IANA time zone of the store on the pricing response. Use it to render transactionTimestamp in store-local time.
+    synonyms:
+      - store time zone
+      - timezone
+      - time zone
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - America/Denver
+  pricingResponse.terminalNumber:
+    type: string
+    description: Virtual POS terminal number on the pricing response.
+    synonyms:
+      - terminal number
+      - terminal
+      - pos terminal
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - "99"
+  pricingResponse.banner:
+    type: string
+    description: Retail banner on the pricing response. Mixed case ("Albertsons"), unlike the uppercase banners on osco.store.
+    synonyms:
+      - banner
+      - retail banner
+      - brand
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    allow_regex: true
+    examples:
+      - Albertsons
+  pricingResponse.company:
+    type: string
+    description: Parent company code the pricing was executed under. Only present on the response side.
+    synonyms:
+      - company
+      - company code
+      - parent company
+      - operating company
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - ABS_PARENT
+  pricingResponse.taxAreaId:
+    type: string
+    description: >-
+      Tax area/jurisdiction id used to calculate tax. Use this for "which tax jurisdiction was applied"
+      questions. Same identifier domain as subOrders.taxInfo.taxAreaId on osco.order.
+    synonyms:
+      - tax area id
+      - tax area
+      - tax jurisdiction
+      - tax zone
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "130010030"
+  pricingResponse.taxType:
+    type: string
+    description: Tax treatment applied to the transaction. SALE is the observed value.
+    synonyms:
+      - tax type
+      - tax treatment
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - SALE
+  pricingResponse.enableTax:
+    type: boolean
+    description: Whether tax calculation was enabled on the response. If false, treat tax figures as not applicable rather than as zero tax owed.
+    synonyms:
+      - enable tax
+      - tax enabled
+      - was tax calculated
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - true
+  pricingResponse.transactionTimestamp:
+    type: datetime
+    description: >-
+      Timestamp (UTC) when the transaction was priced. A real BSON date, unlike the epoch milliseconds on the
+      request side, so this is the field to use for all date range filters and for sorting by recency. It is
+      the collection's default sort.
+    synonyms:
+      - transaction timestamp
+      - transaction date
+      - pricing date
+      - priced at
+      - when was it priced
+      - pricing time
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "2024-08-09T01:14:17.146Z"
+  pricingResponse.isSnap:
+    type: boolean
+    description: Whether the priced transaction was treated as a SNAP transaction. Genuine boolean.
+    synonyms:
+      - is snap
+      - snap
+      - snap transaction
+      - food stamp
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - false
+  pricingResponse.isAutoReplenishment:
+    type: boolean
+    description: Whether the priced order is an auto-replenishment order. Genuine boolean.
+    synonyms:
+      - auto replenishment
+      - auto replenish
+      - subscription order
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - false
+
+  # ---------- pricingResponse: transaction totals. READ NOTES 2, 3 AND 4 ABOVE. ----------
+  pricingResponse.finalTransactionTotal:
+    type: string
+    description: >-
+      FINAL amount for the transaction - item subtotal plus tax and fees. This is the figure to use for "order
+      total" and "what did the customer pay". In the sample it equals originalTransactionTotal + totalTax
+      ("6.38" + "16.29" = "22.67") and matches fundsAllocation.totalAllocatedAmount. Decimal string, so avoid
+      numeric range filters.
+    synonyms:
+      - final transaction total
+      - final total
+      - order total
+      - grand total
+      - total charged
+      - amount paid
+      - what did the customer pay
+      - total amount
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "22.67"
+  pricingResponse.transactionTotal:
+    type: string
+    description: >-
+      Item subtotal before tax and fees, as a decimal string. Despite the name this is NOT the amount charged -
+      use finalTransactionTotal for that. In the sample it equals the sum of item prices and
+      pricingRequest.snapEligibleTotal ("6.38").
+    synonyms:
+      - transaction total
+      - subtotal
+      - item subtotal
+      - pre tax total
+      - merchandise total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "6.38"
+  pricingResponse.originalTransactionTotal:
+    type: string
+    description: >-
+      Item subtotal as originally priced, before any repricing. Equal to transactionTotal in the sample; a
+      difference between the two indicates the transaction was repriced.
+    synonyms:
+      - original transaction total
+      - original total
+      - original subtotal
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "6.38"
+  pricingResponse.totalTax:
+    type: string
+    description: >-
+      Total reported as tax, as a decimal string - but in the sample it also INCLUDES FEES. Its 16.29 is the sum
+      of the tax.details entries "Sales Tax" 0.39, "Delivery Fee" 11.95 and "Minimum Order Fee (under $30)"
+      3.95. Do not report this as the sales tax amount; for real sales tax use the "Sales Tax" entry in
+      pricingResponse.tax.details or sum pricingResponse.items.tax.total.
+    synonyms:
+      - total tax
+      - tax total
+      - tax amount
+      - how much tax
+      - tax charged
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "16.29"
+  pricingResponse.totalSavings:
+    type: string
+    description: Total savings applied to the transaction, as a decimal string. "0.00" means no savings were applied even if offers appear under pricingRequest.txnLevelSavings.
+    synonyms:
+      - total savings
+      - savings
+      - total discount
+      - how much did they save
+      - discount total
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "0.00"
+  pricingResponse.totalCardSavings:
+    type: string
+    description: Total savings attributable to the loyalty card, as a decimal string. A subset of totalSavings.
+    synonyms:
+      - total card savings
+      - card savings
+      - loyalty savings
+      - club card savings
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "0.00"
+
+  # ---------- pricingResponse: transaction level tax breakdown ----------
+  # NOTE: at this level tax.total is a NUMBER and tax.details is an ARRAY of {key, value}.
+  # At item and charge level tax.total is a STRING and tax.details is an OBJECT MAP. See note 5.
+  pricingResponse.tax.total:
+    type: decimal
+    description: >-
+      Transaction level tax total. The one genuinely numeric money field on this collection - filter it with an
+      unquoted number, unlike the string totals elsewhere. Carries the same value as the string field totalTax
+      and, like it, includes fees in the sample record.
+    synonyms:
+      - tax total
+      - total tax amount
+      - tax
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - 16.29
+  pricingResponse.tax.details.key:
+    type: string
+    description: >-
+      Name of a line in the transaction level tax breakdown, such as "Sales Tax", "Delivery Fee" or "Minimum
+      Order Fee (under $30)". Use this to separate genuine tax from fees inside totalTax. Because array
+      elements cannot be isolated, retrieve both key and value and pair them after retrieval.
+    synonyms:
+      - tax detail key
+      - tax line name
+      - tax breakdown name
+      - fee name
+      - charge name
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    allow_regex: true
+    examples:
+      - Sales Tax
+      - Delivery Fee
+  pricingResponse.tax.details.value:
+    type: string
+    description: Amount for a line in the transaction level tax breakdown, as a decimal string. Pair with the corresponding key after retrieval.
+    synonyms:
+      - tax detail value
+      - tax line amount
+      - tax breakdown amount
+      - fee amount
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - "0.39"
+      - "11.95"
+
+  # ---------- pricingResponse: priced items (authoritative item detail) ----------
+  pricingResponse.items.itemCode:
+    type: string
+    description: >-
+      Item code of a priced item, in zero padded 13 character UPC form. Prefer this field for "what did item X
+      cost" questions. When the user supplies a bare UPC, try it with and without leading zeros.
+    synonyms:
+      - item code
+      - upc
+      - upc id
+      - item upc
+      - barcode
+      - sku
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    allow_regex: true
+    indexed: true
+    examples:
+      - "0002113007010"
+  pricingResponse.items.description:
+    type: string
+    description: Human readable description of a priced item. Use this for product name searches; supports regex/partial matching because users type product names loosely.
+    synonyms:
+      - item description
+      - item name
+      - product name
+      - product description
+      - what item
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    allow_regex: true
+    examples:
+      - Lucerne Milk - Half Gallon (container may vary)
+  pricingResponse.items.entryId:
+    type: integer
+    description: Entry id of the priced item line within the pricing transaction. Integer typed.
+    synonyms:
+      - entry id
+      - line entry id
+      - item entry id
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - 5001
+  pricingResponse.items.originalEntryId:
+    type: integer
+    description: Entry id the priced item maps back to on the customer's original cart. Use this to line pricing entries up with order lines.
+    synonyms:
+      - original entry id
+      - cart entry id
+      - original line id
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - 1
+  pricingResponse.items.department:
+    type: integer
+    description: Store department number the item belongs to. Integer typed.
+    synonyms:
+      - department
+      - department number
+      - dept
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - 314
+  pricingResponse.items.smicCode:
+    type: string
+    description: SMIC (merchandise hierarchy) code for the item. Same identifier domain as subOrders.orderLines.smicCode on osco.order.
+    synonyms:
+      - smic
+      - smic code
+      - merchandise code
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - "3610010102"
+  pricingResponse.items.productClass:
+    type: string
+    description: Product class code assigned during pricing, used for tax classification. Only present on the response side.
+    synonyms:
+      - product class
+      - product class code
+      - tax class
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - "8162"
+  pricingResponse.items.qty:
+    type: integer
+    description: Quantity of the item priced. Genuine integer - filter unquoted.
+    synonyms:
+      - quantity
+      - qty
+      - item quantity
+      - how many
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - 1
+  pricingResponse.items.quantityType:
+    type: string
+    description: Unit the quantity is expressed in. EA denotes each/unit pricing, as opposed to weight based.
+    synonyms:
+      - quantity type
+      - uom type
+      - each or weight
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - EA
+  pricingResponse.items.quantityValue:
+    type: string
+    description: Quantity as a decimal string ("1.0"), present only on the response side alongside the integer qty. Use qty for filtering.
+    synonyms:
+      - quantity value
+      - decimal quantity
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "1.0"
+  pricingResponse.items.unitOfMeasure:
+    type: string
+    description: Unit of measure code for the item, such as HG for half gallon.
+    synonyms:
+      - unit of measure
+      - uom
+      - measure
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - HG
+  pricingResponse.items.itemSizeQty:
+    type: string
+    description: Item size quantity as a decimal string, paired with unitOfMeasure to express package size.
+    synonyms:
+      - item size quantity
+      - item size
+      - size
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "1.0"
+  pricingResponse.items.itemPackageQty:
+    type: string
+    description: Number of units in the item's package, as a decimal string.
+    synonyms:
+      - item package quantity
+      - package quantity
+      - pack size
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "1.0"
+  pricingResponse.items.unitPrice:
+    type: string
+    description: Priced unit price of the item, as a decimal string. Use this for "what was the price of item X" questions.
+    synonyms:
+      - unit price
+      - item price
+      - price per unit
+      - what did it cost
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - "2.39"
+  pricingResponse.items.netItemPrice:
+    type: string
+    description: Net price of the item after item level discounts, as a decimal string. The figure that rolls up into transactionTotal.
+    synonyms:
+      - net item price
+      - net price
+      - final item price
+      - discounted item price
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - "2.39"
+  pricingResponse.items.basePrice:
+    type: string
+    description: Base (undiscounted) price of the item, as a decimal string. Compare with price to see the effect of promotions.
+    synonyms:
+      - base price
+      - regular price
+      - list price
+      - undiscounted price
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - "2.39"
+  pricingResponse.items.price:
+    type: string
+    description: Effective price of the item after promotions, as a decimal string.
+    synonyms:
+      - price
+      - effective price
+      - promo price
+      - sale price
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - "2.39"
+  pricingResponse.items.basePricePer:
+    type: string
+    description: Base price per unit of measure (for example per ounce), as a decimal string. Shelf unit pricing detail.
+    synonyms:
+      - base price per
+      - base unit price
+      - price per ounce base
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "0.04"
+  pricingResponse.items.pricePer:
+    type: string
+    description: Effective price per unit of measure, as a decimal string. Shelf unit pricing detail.
+    synonyms:
+      - price per
+      - unit of measure price
+      - price per ounce
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "0.04"
+  pricingResponse.items.extendedPrice:
+    type: string
+    description: Line extended price (unit price times quantity) after discounts, as a decimal string. Only present on the response side.
+    synonyms:
+      - extended price
+      - line total
+      - line amount
+      - item line total
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - "2.39"
+  pricingResponse.items.extendedBasePrice:
+    type: string
+    description: Line extended price at base price, as a decimal string. Only present on the response side.
+    synonyms:
+      - extended base price
+      - line base total
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "2.39"
+  pricingResponse.items.netPromotionAmount:
+    type: string
+    description: Net amount attributed to the item after promotions, as a decimal string. Only present on the response side.
+    synonyms:
+      - net promotion amount
+      - promotion amount
+      - promo amount
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "2.39"
+  pricingResponse.items.writeOffAmount:
+    type: string
+    description: >-
+      Amount written off for the item, as a decimal string. Non-zero values indicate the item's cost was
+      absorbed rather than charged, so use this for write-off questions.
+    synonyms:
+      - write off amount
+      - writeoff
+      - written off
+      - absorbed amount
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "0.00"
+  pricingResponse.items.savings:
+    type: array
+    description: >-
+      Item level savings/offers applied to this item. Empty in the sample record, so its element structure is
+      unknown - check for a non-empty array before reporting item savings and do not assume field names inside
+      it. Transaction level offers are under pricingRequest.txnLevelSavings.
+    synonyms:
+      - item savings
+      - item discounts
+      - item offers
+      - line savings
+    searchable: false
+    filterable: false
+    sortable: false
+    return_by_default: false
+    pii: false
+  pricingResponse.items.tax.total:
+    type: string
+    description: >-
+      Tax charged on the item, as a decimal STRING (unlike the numeric transaction level pricingResponse.tax.total).
+      Summing these across items gives the genuine sales tax for the order, which is what the "Sales Tax" entry
+      in pricingResponse.tax.details reports - use it rather than totalTax, which folds in fees.
+    synonyms:
+      - item tax
+      - item tax total
+      - tax on item
+      - line tax
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - "0.15"
+  pricingResponse.items.tax.details:
+    type: object
+    description: >-
+      Item level tax breakdown as an OBJECT MAP keyed by tax name, for example {"Sales Tax": "0.15"} - a
+      different shape from the transaction level pricingResponse.tax.details, which is an array of {key, value}.
+      Because the keys are dynamic they cannot be declared individually; return the whole map and read it.
+    synonyms:
+      - item tax details
+      - item tax breakdown
+      - tax detail on item
+    searchable: false
+    filterable: false
+    sortable: false
+    return_by_default: false
+    pii: false
+  pricingResponse.items.isSnapEligible:
+    type: boolean
+    description: Whether the item is SNAP eligible. Genuine boolean. Note an item can be SNAP eligible while the transaction itself is not a SNAP transaction (isSnap false).
+    synonyms:
+      - is snap eligible
+      - snap eligible
+      - food stamp eligible
+      - ebt eligible item
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - true
+  pricingResponse.items.isDSEligible:
+    type: boolean
+    description: >-
+      Whether the item is eligible for Direct Spend (a health/benefit spending program such as SODA_HEALTH).
+      Genuine boolean. Pairs with DIRECTSPEND tender allocations.
+    synonyms:
+      - is ds eligible
+      - direct spend eligible
+      - ds eligible
+      - benefit eligible
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - true
+  pricingResponse.items.isArProduct:
+    type: boolean
+    description: Whether the item is an auto-replenishment eligible product. Genuine boolean.
+    synonyms:
+      - is ar product
+      - auto replenishment product
+      - ar product
+      - subscription product
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - true
+  pricingResponse.items.isReplenishItem:
+    type: boolean
+    description: Whether the item was purchased as part of an auto-replenishment/subscription on this transaction. Genuine boolean.
+    synonyms:
+      - is replenish item
+      - replenish item
+      - subscription item
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - false
+  pricingResponse.items.substituted:
+    type: boolean
+    description: Whether the priced item is a substitution. Genuine boolean. For the substitution detail (what replaced what, and whether the customer approved) use osco.sub_future_preference.
+    synonyms:
+      - substituted
+      - is substituted
+      - was it substituted
+      - substitution
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - false
+  pricingResponse.items.wic:
+    type: boolean
+    description: Whether the item is WIC (Women, Infants and Children program) approved. Genuine boolean.
+    synonyms:
+      - wic
+      - wic eligible
+      - wic approved
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - true
+  pricingResponse.items.discountAllowed:
+    type: boolean
+    description: Whether discounts may be applied to the item. Genuine boolean.
+    synonyms:
+      - discount allowed
+      - discountable
+      - can be discounted
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - false
+  pricingResponse.items.pointsApplyItem:
+    type: boolean
+    description: Whether loyalty points accrue on the item. Genuine boolean.
+    synonyms:
+      - points apply
+      - points apply item
+      - earns points
+      - loyalty points
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - true
+  pricingResponse.items.sellByWeight:
+    type: string
+    description: Sell-by-weight indicator code. "I" denotes an item sold by each/individually rather than by weight.
+    synonyms:
+      - sell by weight
+      - weighted item
+      - sold by weight
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - I
+  pricingResponse.items.averageWeight:
+    type: string
+    description: Average weight of the item as a decimal string. "0.0" for items not sold by weight.
+    synonyms:
+      - average weight
+      - avg weight
+      - item weight
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "0.0"
+  pricingResponse.items.alcoholVolumePct:
+    type: decimal
+    description: >-
+      Alcohol by volume percentage for the item; 0 for non-alcoholic items. Numeric on the response side but a
+      STRING ("0") on the request side, so filter unquoted here and quoted there.
+    synonyms:
+      - alcohol volume pct
+      - alcohol percentage
+      - abv
+      - alcohol content
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - 0
+  pricingResponse.items.salesUnitNbr:
+    type: integer
+    description: >-
+      Sales unit number for the item. SPARSE - present on some item elements and absent on others in the sample
+      record, so a filter on it will silently exclude items where it is missing.
+    synonyms:
+      - sales unit number
+      - sales unit nbr
+      - sales unit
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - 0
+  pricingResponse.items.itemPluNumber:
+    type: string
+    description: PLU (price look-up) number for the item, as a string. "0" when the item has no PLU.
+    synonyms:
+      - plu
+      - plu number
+      - item plu number
+      - price look up code
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - "0"
+  pricingResponse.items.tenderAllocations.tokenNumber:
+    type: string
+    description: Payment token the item's cost was allocated to. Sensitive payment token; never return or filter by it. Use paymentSubType to identify the tender instead.
+    synonyms:
+      - item tender token
+      - payment token
+    searchable: false
+    filterable: false
+    sortable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  pricingResponse.items.tenderAllocations.paymentSubType:
+    type: string
+    description: >-
+      Payment sub type the item's cost was allocated to, such as VISA or SODA_HEALTH. Use this to answer which
+      tender paid for a given item. Note there is no paymentType at item level, only at
+      fundsAllocation.tenderAllocationSummary.
+    synonyms:
+      - item payment sub type
+      - item tender type
+      - which card paid for the item
+      - item payment method
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - SODA_HEALTH
+  pricingResponse.items.tenderAllocations.amount:
+    type: string
+    description: >-
+      Amount of the item's cost allocated to a tender, as a decimal string. Note this can exceed the item's
+      netItemPrice because tax is allocated alongside the item ("2.54" allocated for a "2.39" item).
+    synonyms:
+      - item tender amount
+      - item allocated amount
+      - amount allocated to item
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - "2.54"
+
+  # ---------- pricingResponse: fees and charges ----------
+  pricingResponse.charges.displayName:
+    type: string
+    description: >-
+      Customer facing name of a fee/charge, such as "DeliveryFee" or "Minimum order fee (under $30)". Prefer
+      this field for fee questions; supports regex/partial matching since users type fee names loosely (note
+      "DeliveryFee" has no space).
+    synonyms:
+      - charge name
+      - fee name
+      - delivery fee
+      - service fee
+      - minimum order fee
+      - fee
+      - charge
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    allow_regex: true
+    examples:
+      - DeliveryFee
+      - Minimum order fee (under $30)
+  pricingResponse.charges.description:
+    type: string
+    description: Description of the fee/charge. Duplicates displayName in the sample record.
+    synonyms:
+      - charge description
+      - fee description
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    allow_regex: true
+  pricingResponse.charges.category:
+    type: string
+    description: >-
+      Category of the fee/charge. Observed values are "shipping" for delivery fees and "service" for service
+      fees - note these are lowercase, unlike most codes in OSCO.
+    synonyms:
+      - charge category
+      - fee category
+      - fee type
+      - shipping
+      - service fee category
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - shipping
+      - service
+  pricingResponse.charges.upc:
+    type: string
+    description: Internal UPC used to represent the fee as a sellable line. Zero padded 13 characters.
+    synonyms:
+      - charge upc
+      - fee upc
+      - fee item code
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - "0000000022119"
+  pricingResponse.charges.salesPrice:
+    type: string
+    description: Amount actually charged for the fee, as a decimal string. Use this for "how much was the delivery fee" questions.
+    synonyms:
+      - charge amount
+      - fee amount
+      - how much was the fee
+      - sales price
+      - fee charged
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - "11.95"
+  pricingResponse.charges.originalPrice:
+    type: string
+    description: Original amount of the fee before any waiver or adjustment, as a decimal string. A difference from salesPrice indicates the fee was adjusted.
+    synonyms:
+      - charge original price
+      - original fee amount
+      - fee before discount
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - "11.95"
+  pricingResponse.charges.tax.total:
+    type: string
+    description: >-
+      Tax charged on the fee, as a decimal STRING. "0.00" in the sample, meaning the fees were not themselves
+      taxed - even though the fee amounts are folded into the transaction level totalTax.
+    synonyms:
+      - charge tax
+      - fee tax
+      - tax on fee
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "0.00"
+  pricingResponse.charges.tax.details:
+    type: object
+    description: >-
+      Fee level tax breakdown as an OBJECT MAP keyed by tax name, for example {"Sales Tax": "0.00"} - the same
+      shape as item level tax details, and different from the transaction level array form. Dynamic keys, so
+      return the whole map and read it.
+    synonyms:
+      - charge tax details
+      - fee tax breakdown
+    searchable: false
+    filterable: false
+    sortable: false
+    return_by_default: false
+    pii: false
+  pricingResponse.charges.tenderAllocations.tokenNumber:
+    type: string
+    description: Payment token the fee was allocated to. Sensitive payment token; never return or filter by it.
+    synonyms:
+      - charge tender token
+      - fee payment token
+    searchable: false
+    filterable: false
+    sortable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  pricingResponse.charges.tenderAllocations.paymentSubType:
+    type: string
+    description: Payment sub type the fee was charged to, such as VISA. Use this to answer which tender paid the fees - in the sample, fees went to the credit card rather than the Direct Spend tender.
+    synonyms:
+      - charge payment sub type
+      - fee payment method
+      - which card paid the fee
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - VISA
+  pricingResponse.charges.tenderAllocations.amount:
+    type: string
+    description: Amount of the fee allocated to a tender, as a decimal string.
+    synonyms:
+      - charge tender amount
+      - fee allocated amount
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - "11.95"
+
+  # ---------- pricingResponse: funds allocation across tenders ----------
+  pricingResponse.fundsAllocation.totalAllocatedAmount:
+    type: string
+    description: >-
+      Total amount allocated across all payment tenders, as a decimal string. Should equal
+      finalTransactionTotal - it does in the sample ("22.67") - so use it as a cross-check when a total looks
+      wrong.
+    synonyms:
+      - total allocated amount
+      - total allocated
+      - amount allocated
+      - total funds allocated
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "22.67"
+  pricingResponse.fundsAllocation.unallocatedAmount:
+    type: string
+    description: >-
+      Amount of the total not covered by any tender, as a decimal string. Should be "0.00"; a non-zero value
+      means the order is underfunded, so this is a useful field for payment problem questions.
+    synonyms:
+      - unallocated amount
+      - unallocated
+      - unfunded amount
+      - amount not covered
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "0.00"
+  pricingResponse.fundsAllocation.totalSnapAmount:
+    type: string
+    description: Total amount paid with SNAP/EBT funds, as a decimal string.
+    synonyms:
+      - total snap amount
+      - snap amount
+      - ebt amount
+      - snap paid
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "0.00"
+  pricingResponse.fundsAllocation.totalWriteOffAmount:
+    type: string
+    description: Total amount written off across the transaction, as a decimal string. Non-zero values indicate absorbed cost.
+    synonyms:
+      - total write off amount
+      - write off total
+      - total writeoff
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "0.00"
+  pricingResponse.fundsAllocation.totalRefundAmount:
+    type: string
+    description: Total amount refunded on the transaction, as a decimal string. Use this for refund questions, but confirm against the order's own payment records on osco.order.
+    synonyms:
+      - total refund amount
+      - refund amount
+      - refunded
+      - total refunded
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "0.00"
+  pricingResponse.fundsAllocation.data.totalBannerCashAmount:
+    type: string
+    description: Total banner cash (store credit) applied to the transaction, as a decimal string.
+    synonyms:
+      - banner cash amount
+      - total banner cash
+      - store credit
+      - banner cash
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "0.00"
+  pricingResponse.fundsAllocation.data.totalBannerCashDeltaAmount:
+    type: string
+    description: Change in banner cash applied relative to the previous allocation, as a decimal string.
+    synonyms:
+      - banner cash delta
+      - banner cash change
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "0.00"
+  pricingResponse.fundsAllocation.data.totalBannerCashRefundAmount:
+    type: string
+    description: Banner cash refunded on the transaction, as a decimal string.
+    synonyms:
+      - banner cash refund
+      - store credit refund
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "0.00"
+  pricingResponse.fundsAllocation.data.totalAchAmount:
+    type: string
+    description: >-
+      Total paid by ACH/bank transfer, as a decimal string. Note the sample value is "0" rather than the "0.00"
+      used by the sibling amount fields, so match both forms when filtering for zero.
+    synonyms:
+      - ach amount
+      - total ach
+      - bank transfer amount
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    examples:
+      - "0"
+  pricingResponse.fundsAllocation.tenderAllocationSummary.tokenNumber:
+    type: string
+    description: Payment token for a tender in the allocation summary. Sensitive payment token; never return or filter by it. Identify tenders by paymentType/paymentSubType instead.
+    synonyms:
+      - tender token
+      - allocation token
+      - payment token
+      - card number
+    searchable: false
+    filterable: false
+    sortable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  pricingResponse.fundsAllocation.tenderAllocationSummary.paymentType:
+    type: string
+    description: >-
+      Payment type for a tender in the allocation summary. Observed values are CREDITCARD and DIRECTSPEND. Use
+      this to answer how the order was paid and to detect split-tender orders (more than one entry in the
+      summary).
+    synonyms:
+      - payment type
+      - tender type
+      - payment method
+      - how was it paid
+      - paid with
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - CREDITCARD
+      - DIRECTSPEND
+  pricingResponse.fundsAllocation.tenderAllocationSummary.paymentSubType:
+    type: string
+    description: >-
+      Payment sub type for a tender in the allocation summary, such as VISA for a credit card or SODA_HEALTH for
+      a Direct Spend benefit program. Use this for card brand and benefit program questions.
+    synonyms:
+      - payment sub type
+      - card type
+      - card brand
+      - tender sub type
+      - visa
+      - soda health
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - VISA
+      - SODA_HEALTH
+  pricingResponse.fundsAllocation.tenderAllocationSummary.amount:
+    type: string
+    description: >-
+      Amount allocated to a tender, as a decimal string. The entries should sum to totalAllocatedAmount
+      ("15.90" + "6.77" = "22.67" in the sample). Because array elements cannot be isolated, retrieve the
+      paymentType, paymentSubType and amount together and pair them after retrieval.
+    synonyms:
+      - tender amount
+      - allocated amount
+      - amount per tender
+      - how much on each card
+      - payment split amount
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - "15.90"
+      - "6.77"
+
+  # ---------- pricingResponse: addresses (STORE and CUSTOMER entries in one array) ----------
+  # The request side mirrors these fields; only the response side is declared to limit the PII surface.
+  # Note zipCodeExtn differs between request and response for the same address in the sample record, so
+  # treat the extension as unreliable.
+  pricingResponse.addresses.addressType:
+    type: string
+    description: >-
+      Type of an address entry - STORE for the fulfilling store, CUSTOMER for the delivery address. Since array
+      elements cannot be isolated, a filter on another addresses.* field may match either entry; return
+      addressType alongside any address field so the entries can be told apart.
+    synonyms:
+      - address type
+      - store or customer address
+      - which address
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - STORE
+      - CUSTOMER
+  pricingResponse.addresses.storeId:
+    type: string
+    description: >-
+      Store id on the STORE address entry, zero padded to four characters. Absent on the CUSTOMER entry. Matches
+      storeId on osco.store.
+    synonyms:
+      - store id
+      - address store id
+      - store number on address
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "0177"
+  pricingResponse.addresses.streetAddress1:
+    type: string
+    description: Street address line of an address entry. Address data - do not return or filter by default; for the CUSTOMER entry this is customer PII.
+    synonyms:
+      - street address
+      - address line 1
+      - address
+    searchable: false
+    filterable: false
+    sortable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  pricingResponse.addresses.city:
+    type: string
+    description: City of an address entry. Address data - do not return by default. A filter here may match either the store or the customer entry.
+    synonyms:
+      - city
+      - address city
+    searchable: false
+    filterable: false
+    sortable: false
+    return_by_default: false
+    pii: true
+  pricingResponse.addresses.state:
+    type: string
+    description: State of an address entry. Address data - do not return by default. A filter here may match either the store or the customer entry.
+    synonyms:
+      - state
+      - address state
+    searchable: false
+    filterable: false
+    sortable: false
+    return_by_default: false
+    pii: true
+  pricingResponse.addresses.zipCode:
+    type: string
+    description: >-
+      ZIP code of an address entry. Address data - do not return or filter by default. Relevant to tax
+      jurisdiction, but use pricingResponse.taxAreaId for tax questions instead.
+    synonyms:
+      - zip
+      - zip code
+      - postal code
+    searchable: false
+    filterable: false
+    sortable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+  pricingResponse.addresses.zipCodeExtn:
+    type: string
+    description: >-
+      ZIP+4 extension of an address entry. Unreliable - the request and response carry different extensions for
+      the same address in the sample record, and the value may be an empty string. Do not use it to identify a
+      location.
+    synonyms:
+      - zip extension
+      - zip plus 4
+      - zip code extension
+    searchable: false
+    filterable: false
+    sortable: false
+    return_by_default: false
+    pii: true
+  pricingResponse.addresses.country:
+    type: string
+    description: Country code of an address entry. USA in the sample. Not customer identifying on its own.
+    synonyms:
+      - country
+      - country code
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - USA
+
+  # ---------- Technical persistence metadata ----------
+  _class:
+    type: string
+    description: Java class used by Spring Data to persist the document. Technical metadata only - not useful for business questions and should not be returned unless explicitly requested.
+    synonyms:
+      - class
+      - java class
+      - document class
+      - _class
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - com.albertsons.ecommerce.osco.pricing.model.PricingData
+
+sample_queries:
+  - user_request: show pricing data for order 70470889
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        orderNumber: "70470889"
+  - user_request: what was the total for order 70470889
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        orderNumber: "70470889"
+      fields:
+        - orderNumber
+        - pricingResponse.finalTransactionTotal
+        - pricingResponse.transactionTotal
+        - pricingResponse.totalTax
+        - pricingResponse.totalSavings
+  - user_request: how much tax was charged on order 70470889
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        orderNumber: "70470889"
+      fields:
+        - orderNumber
+        - pricingResponse.totalTax
+        - pricingResponse.tax.total
+        - pricingResponse.tax.details.key
+        - pricingResponse.tax.details.value
+        - pricingResponse.taxAreaId
+  - user_request: give me the tax breakdown for order 70470889
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        orderNumber: "70470889"
+      fields:
+        - orderNumber
+        - pricingResponse.tax.details.key
+        - pricingResponse.tax.details.value
+        - pricingResponse.items.itemCode
+        - pricingResponse.items.description
+        - pricingResponse.items.tax.total
+  - user_request: what fees were charged on order 70470889
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        orderNumber: "70470889"
+      fields:
+        - orderNumber
+        - pricingResponse.charges.displayName
+        - pricingResponse.charges.category
+        - pricingResponse.charges.originalPrice
+        - pricingResponse.charges.salesPrice
+  - user_request: what was the delivery fee on order 70470889
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        orderNumber: "70470889"
+      fields:
+        - orderNumber
+        - pricingResponse.charges.displayName
+        - pricingResponse.charges.salesPrice
+        - pricingRequest.fulfillmentType
+  - user_request: show orders that were charged a minimum order fee
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        pricingResponse.charges.displayName:
+          $regex: minimum order fee
+          $options: i
+      fields:
+        - orderNumber
+        - pricingResponse.charges.displayName
+        - pricingResponse.charges.salesPrice
+  - user_request: how was order 70470889 paid
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        orderNumber: "70470889"
+      fields:
+        - orderNumber
+        - pricingResponse.finalTransactionTotal
+        - pricingResponse.fundsAllocation.totalAllocatedAmount
+        - pricingResponse.fundsAllocation.tenderAllocationSummary.paymentType
+        - pricingResponse.fundsAllocation.tenderAllocationSummary.paymentSubType
+        - pricingResponse.fundsAllocation.tenderAllocationSummary.amount
+  - user_request: show orders paid with direct spend
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        pricingResponse.fundsAllocation.tenderAllocationSummary.paymentType: DIRECTSPEND
+      fields:
+        - orderNumber
+        - pricingResponse.fundsAllocation.tenderAllocationSummary.paymentType
+        - pricingResponse.fundsAllocation.tenderAllocationSummary.paymentSubType
+        - pricingResponse.fundsAllocation.tenderAllocationSummary.amount
+  - user_request: show orders paid with SODA_HEALTH
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        pricingResponse.fundsAllocation.tenderAllocationSummary.paymentSubType: SODA_HEALTH
+  - user_request: find orders with unallocated funds
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        pricingResponse.fundsAllocation.unallocatedAmount:
+          $ne: "0.00"
+      fields:
+        - orderNumber
+        - pricingResponse.finalTransactionTotal
+        - pricingResponse.fundsAllocation.totalAllocatedAmount
+        - pricingResponse.fundsAllocation.unallocatedAmount
+  - user_request: show item prices for order 70470889
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        orderNumber: "70470889"
+      fields:
+        - orderNumber
+        - pricingResponse.items.itemCode
+        - pricingResponse.items.description
+        - pricingResponse.items.qty
+        - pricingResponse.items.unitPrice
+        - pricingResponse.items.netItemPrice
+        - pricingResponse.items.extendedPrice
+        - pricingResponse.items.tax.total
+  - user_request: which orders included item 0002113007010
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        pricingResponse.items.itemCode: "0002113007010"
+      fields:
+        - orderNumber
+        - pricingResponse.items.itemCode
+        - pricingResponse.items.description
+        - pricingResponse.items.unitPrice
+  - user_request: show pricing for orders containing milk
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        pricingResponse.items.description:
+          $regex: milk
+          $options: i
+      fields:
+        - orderNumber
+        - pricingResponse.items.description
+        - pricingResponse.items.unitPrice
+  - user_request: show snap eligible totals for order 70470889
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        orderNumber: "70470889"
+      fields:
+        - orderNumber
+        - pricingRequest.isSnap
+        - pricingRequest.snapEligibleTotal
+        - pricingRequest.nonSnapEligibleTotal
+        - pricingResponse.fundsAllocation.totalSnapAmount
+  - user_request: show snap transactions
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        pricingResponse.isSnap: true
+  - user_request: which offers were applied to order 70470889
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        orderNumber: "70470889"
+      fields:
+        - orderNumber
+        - pricingRequest.txnLevelSavings.offerId
+        - pricingRequest.txnLevelSavings.externalOfferId
+        - pricingResponse.totalSavings
+        - pricingResponse.totalCardSavings
+  - user_request: find orders that used offer 90120515
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        pricingRequest.txnLevelSavings.offerId: "90120515"
+  - user_request: show pricing for store 0177
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        pricingResponse.storeNumber: "0177"
+      fields:
+        - orderNumber
+        - pricingResponse.storeNumber
+        - pricingResponse.finalTransactionTotal
+        - pricingResponse.transactionTimestamp
+  - user_request: show pricing records priced on 2024-08-09
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        pricingResponse.transactionTimestamp:
+          $gte: "2024-08-09T00:00:00.000Z"
+          $lt: "2024-08-10T00:00:00.000Z"
+      fields:
+        - orderNumber
+        - pricingResponse.transactionTimestamp
+        - pricingResponse.finalTransactionTotal
+  - user_request: show the most recent pricing records
+    target:
+      database: osco
+      collection: pricingData
+      filter: {}
+      sort:
+        pricingResponse.transactionTimestamp: -1
+  - user_request: exclude price checks and show real priced orders
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        pricingRequest.isPriceCheck: false
+      fields:
+        - orderNumber
+        - pricingRequest.isPriceCheck
+        - pricingResponse.finalTransactionTotal
+  - user_request: compare the requested and priced unit prices for order 70470889
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        orderNumber: "70470889"
+      fields:
+        - orderNumber
+        - pricingRequest.items.itemCode
+        - pricingRequest.items.unitPrice
+        - pricingResponse.items.itemCode
+        - pricingResponse.items.unitPrice
+  - user_request: show orders with a write off
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        pricingResponse.fundsAllocation.totalWriteOffAmount:
+          $ne: "0.00"
+      fields:
+        - orderNumber
+        - pricingResponse.fundsAllocation.totalWriteOffAmount
+        - pricingResponse.items.writeOffAmount
+  - user_request: show orders with refunds
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        pricingResponse.fundsAllocation.totalRefundAmount:
+          $ne: "0.00"
+      fields:
+        - orderNumber
+        - pricingResponse.fundsAllocation.totalRefundAmount
+  - user_request: what tax area was used for order 70470889
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        orderNumber: "70470889"
+      fields:
+        - orderNumber
+        - pricingResponse.taxAreaId
+        - pricingResponse.taxType
+        - pricingResponse.enableTax
+        - pricingResponse.addresses.addressType
+        - pricingResponse.addresses.storeId
+  - user_request: show direct spend eligible items on order 70470889
+    target:
+      database: osco
+      collection: pricingData
+      filter:
+        orderNumber: "70470889"
+        pricingResponse.items.isDSEligible: true
+      fields:
+        - orderNumber
+        - pricingResponse.items.description
+        - pricingResponse.items.isDSEligible
+        - pricingResponse.items.tenderAllocations.paymentSubType
+        - pricingResponse.items.tenderAllocations.amount
+
+# Sample pricingData document (reference used to build this schema - kept for context).
+# Abridged: the items arrays and the mirrored pricingRequest sections are truncated, since the second
+# item element and the request-side blocks repeat the same keys shown here.
+# {
+#   "_id": { "$oid": "66b56d6953fc255cb8247539" },
+#   "orderNumber": "70470889",
+#   "pricingRequest": {
+#     "memberId": "714000124863",
+#     "guid": "456-184-1681154390317",
+#     "transactionNumber": "70470889",
+#     "storeNumber": "177",                     <-- UNPADDED, unlike the response
+#     "storeTimeZone": "America/Denver",
+#     "terminalNumber": "99",
+#     "cartCategory": "1P",
+#     "isSnap": false,
+#     "snapEligibleTotal": "6.38",
+#     "nonSnapEligibleTotal": "16.29",
+#     "isEBTCash": false,
+#     "items": [ { "itemCode": "0002113007010", "entryId": 5001, "department": 314,
+#                  "isSnapEligible": true, "unitPrice": "2.39", "basePrice": "2.39",
+#                  "alcoholVolumePct": "0",     <-- STRING here, number on the response
+#                  "salesUnitNbr": 0,           <-- absent on the second item element
+#                  "qty": 1, "netItemPrice": "2.39", "savings": [], "smicCode": "3610010102",
+#                  "description": "Lucerne Milk - Half Gallon (container may vary)",
+#                  "tenderAllocations": [ { "tokenNumber": "5112344981435114",
+#                                           "paymentSubType": "SODA_HEALTH", "amount": "2.54" } ],
+#                  "originalEntryId": 1 }, ... ],
+#     "fulfillmentType": "DELIVERY",
+#     "txnLevelSavings": [ { "offerId": "90120515", "externalOfferId": "90120515-ND",
+#                            "calculateUsage": false, "discountQty": 1, "clipIds": ["No Limit"] }, ... ],
+#     "transactionTimestamp": { "$numberLong": "1723166057146" },   <-- EPOCH MILLIS, not a date
+#     "isAutoReplenishment": false,
+#     "banner": "Albertsons",
+#     "taxType": "SALE",
+#     "enableTax": true,
+#     "addresses": [ { "addressType": "STORE", "storeId": "0177", "streetAddress1": "6240 N Bush Rd",
+#                      "city": "Palmer", "state": "AK", "zipCode": "99645", "zipCodeExtn": "8223",
+#                      "country": "USA" },
+#                    { "addressType": "CUSTOMER", "streetAddress1": "3852 N Eagle Rd", "city": "Boise",
+#                      "state": "ID", "zipCode": "83713", "zipCodeExtn": "", "country": "USA" } ],
+#     "charges": [ { "upc": "0000000022119", "displayName": "DeliveryFee", "category": "shipping",
+#                    "originalPrice": "11.95", "salesPrice": "11.95",
+#                    "tenderAllocations": [ { "tokenNumber": "4112349122484113",
+#                                             "paymentSubType": "VISA", "amount": "11.95" } ] },
+#                  { "upc": "0000000022886", "displayName": "Minimum order fee (under $30)",
+#                    "category": "service", "originalPrice": "3.95", "salesPrice": "3.95", ... } ],
+#     "promoCodeSavings": [],
+#     "tenderAllocationSummary": [ { "tokenNumber": "4112349122484113", "paymentType": "CREDITCARD",
+#                                    "paymentSubType": "VISA", "amount": "15.9" },
+#                                  { "tokenNumber": "5112344981435114", "paymentType": "DIRECTSPEND",
+#                                    "paymentSubType": "SODA_HEALTH", "amount": "6.77" } ],
+#     "isExceptionEnabled": true,
+#     "isPriceCheck": false
+#   },
+#   "pricingResponse": {
+#     "memberId": "714000124863",
+#     "transactionNumber": "70470889",
+#     "storeNumber": "0177",                    <-- PADDED, unlike the request
+#     "storeTimeZone": "America/Denver",
+#     "terminalNumber": "99",
+#     "isSnap": false,
+#     "transactionTotal": "6.38",               <-- item subtotal, NOT the amount charged
+#     "totalCardSavings": "0.00",
+#     "items": [ { "itemCode": "0002113007010", "entryId": 5001, "originalEntryId": 1,
+#                  "department": 314, "isSnapEligible": true, "netItemPrice": "2.39",
+#                  "unitPrice": "2.39", "extendedPrice": "2.39", "extendedBasePrice": "2.39",
+#                  "quantityType": "EA", "quantityValue": "1.0", "qty": 1,
+#                  "alcoholVolumePct": 0,       <-- NUMBER here, string on the request
+#                  "netPromotionAmount": "2.39", "savings": [], "smicCode": "3610010102",
+#                  "productClass": "8162",
+#                  "tax": { "total": "0.15", "details": { "Sales Tax": "0.15" } },  <-- MAP shape
+#                  "tenderAllocations": [ { "tokenNumber": "5112344981435114",
+#                                           "paymentSubType": "SODA_HEALTH", "amount": "2.54" } ],
+#                  "writeOffAmount": "0.00", "isDSEligible": true,
+#                  "description": "Lucerne Milk - Half Gallon (container may vary)" }, ... ],
+#     "transactionTimestamp": { "$date": "2024-08-09T01:14:17.146Z" },   <-- real DATE
+#     "isAutoReplenishment": false,
+#     "banner": "Albertsons",
+#     "company": "ABS_PARENT",
+#     "taxAreaId": "130010030",
+#     "taxType": "SALE",
+#     "enableTax": true,
+#     "finalTransactionTotal": "22.67",         <-- the amount actually charged
+#     "originalTransactionTotal": "6.38",
+#     "totalTax": "16.29",                      <-- INCLUDES FEES, see tax.details below
+#     "addresses": [ { "addressType": "STORE", "storeId": "0177", ..., "zipCodeExtn": "5507" },
+#                    { "addressType": "CUSTOMER", ..., "zipCodeExtn": "0750" } ],
+#     "charges": [ { "upc": "0000000022119", "displayName": "DeliveryFee", "category": "shipping",
+#                    "originalPrice": "11.95", "salesPrice": "11.95",
+#                    "tax": { "total": "0.00", "details": { "Sales Tax": "0.00" } },
+#                    "tenderAllocations": [ { "tokenNumber": "4112349122484113",
+#                                             "paymentSubType": "VISA", "amount": "11.95" } ] }, ... ],
+#     "tax": {
+#       "total": 16.29,                         <-- NUMBER here, string at item/charge level
+#       "details": [                            <-- ARRAY of {key,value}, not a map
+#         { "key": "Sales Tax", "value": "0.39" },
+#         { "key": "Delivery Fee", "value": "11.95" },
+#         { "key": "Minimum Order Fee (under $30)", "value": "3.95" }
+#       ]
+#     },
+#     "fundsAllocation": {
+#       "totalAllocatedAmount": "22.67",        <-- matches finalTransactionTotal
+#       "unallocatedAmount": "0.00",
+#       "totalSnapAmount": "0.00",
+#       "totalWriteOffAmount": "0.00",
+#       "totalRefundAmount": "0.00",
+#       "data": { "totalBannerCashAmount": "0.00", "totalBannerCashDeltaAmount": "0.00",
+#                 "totalBannerCashRefundAmount": "0.00", "totalAchAmount": "0" },
+#       "tenderAllocationSummary": [
+#         { "tokenNumber": "5112344981435114", "paymentType": "DIRECTSPEND",
+#           "paymentSubType": "SODA_HEALTH", "amount": "6.77", "data": {} },
+#         { "tokenNumber": "4112349122484113", "paymentType": "CREDITCARD",
+#           "paymentSubType": "VISA", "amount": "15.90", "data": {} }
+#       ]
+#     },
+#     "totalSavings": "0.00"
+#   },
+#   "_class": "com.albertsons.ecommerce.osco.pricing.model.PricingData"
+# }

@@ -1,27 +1,386 @@
 database: osco
 collection: batchjob
-display_name: Batchjob
-description: Starter schema for the osco.batchjob collection.
+display_name: Batch Job
+description: OSCO batch job execution tracking document. One record per Spring Batch job configured in the OSCO processor, holding the job's identity (batchId, batchName), its purpose, and the outcome of its most recent run (lastRunStatus, start/end timestamps, and step-level execution details). Use this collection to answer questions about scheduled/background job health, whether a job ran, when it last ran, how long it took, and why it failed.
 business_context:
   primary_entity: batchjob
   common_user_phrases:
-    - batchjob
-    - osco batchjob
-  when_to_use: Use for questions specifically about OSCO batchjob records.
+    - show all batch jobs
+    - list batch jobs
+    - did the batch job run
+    - when did the batch job last run
+    - last run status of batch job
+    - which batch jobs failed
+    - show failed batch jobs
+    - batch job status
+    - find batch job by name
+    - find batch job by id
+    - how long did the batch job take
+    - batch job start and end time
+    - why did the batch job fail
+    - step details for batch job
+    - eod cancel job status
+    - reschedule cutoff job status
+    - batch jobs that ran today
+    - batch jobs that have not run
+    - currently running batch jobs
+  when_to_use: >-
+    Use this collection for OSCO batch/scheduled job questions - listing configured jobs, checking the status
+    and timing of the most recent execution of a job, finding failed or stuck jobs, inspecting Spring Batch
+    step execution details, and looking a job up by batchId or batchName.
+  when_not_to_use: >-
+    Do not use for order-level or business data questions - a batch job record only describes the job run itself,
+    not the orders it processed. For orders affected by a job (for example cancelled EOD orders), use the
+    osco.order collection. For report generation jobs use osco.reportJob, and for outbound API failures use
+    osco.failed_apis. For fulfillment-side batch jobs use the orderff.batchjob collection instead.
 aliases:
   - batchjob
+  - batch job
+  - batch jobs
+  - batch
+  - job
+  - jobs
+  - scheduled job
+  - scheduled jobs
+  - cron job
+  - background job
+  - batch execution
 identity:
   primary_key: _id
+  business_keys:
+    - batchId
+    - batchName
+default_sort:
+  field: lastRunStartDate
+  direction: desc
 default_limit: 10
 fields:
+  # Mongo document identity.
   _id:
     type: objectId
-    description: MongoDB internal document id.
+    description: MongoDB internal document id. Use only when the user explicitly provides a Mongo document id/ObjectId.
     synonyms:
       - mongo id
       - document id
+      - object id
+      - _id
     searchable: true
     filterable: true
+    sortable: false
     return_by_default: true
     pii: false
+    exact_match: true
+    examples:
+      - 66ea96a84badec581a4ac52c
 
+  # Batch job identifiers and metadata.
+  batchId:
+    type: integer
+    description: Numeric business identifier of the batch job. Prefer this field when the user provides a batch id or job number. Unique per configured job.
+    synonyms:
+      - batch id
+      - job id
+      - batch number
+      - job number
+      - batch identifier
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - 1
+      - 2
+  batchName:
+    type: string
+    description: Name of the batch job as configured in the OSCO processor, in upper snake case. Prefer this field when the user refers to a job by name or by a fragment of a name (for example "EOD cancel job" or "reschedule cutoff job"). Supports regex/partial matching because users rarely type the full name.
+    synonyms:
+      - batch name
+      - job name
+      - batch job name
+      - name of the job
+      - job
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: false
+    allow_regex: true
+    indexed: true
+    examples:
+      - ORDER_EOD_CANCEL_JOB_FOR_RESCHEDULE_CUTOFF
+  batchDescription:
+    type: string
+    description: Human readable description of what the batch job does. Often mirrors batchName. Use this when the user asks what a job does or for its purpose.
+    synonyms:
+      - batch description
+      - job description
+      - description
+      - what the job does
+      - purpose of the job
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    allow_regex: true
+    examples:
+      - ORDER_EOD_CANCEL_JOB_FOR_RESCHEDULE_CUTOFF
+
+  # Most recent execution outcome.
+  lastRunStatus:
+    type: string
+    description: Spring Batch exit status of the most recent execution of this job. Use this to answer whether a job succeeded or failed. COMPLETED means the run finished successfully; FAILED means the run errored; STARTED/STARTING means the run is still in progress; STOPPED/ABANDONED mean the run was halted. Only reflects the latest run, not history.
+    synonyms:
+      - last run status
+      - batch status
+      - job status
+      - run status
+      - execution status
+      - status
+      - did the job succeed
+      - did the job fail
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    enum:
+      - COMPLETED
+      - FAILED
+      - STARTED
+      - STARTING
+      - STOPPING
+      - STOPPED
+      - ABANDONED
+      - UNKNOWN
+    examples:
+      - COMPLETED
+      - FAILED
+  lastRunStartDate:
+    type: datetime
+    description: Timestamp (UTC) when the most recent execution of this job started. Use this for "when did the job last run", for date range filters on job runs, and as the default sort for recency. Pair with lastRunEndDate to compute run duration.
+    synonyms:
+      - last run start date
+      - last run time
+      - job start time
+      - batch start time
+      - start date
+      - when did it last run
+      - last executed
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "2024-09-18T09:00:15.616Z"
+  lastRunEndDate:
+    type: datetime
+    description: Timestamp (UTC) when the most recent execution of this job finished. A value earlier than lastRunStartDate, or a missing value while lastRunStatus is STARTED, indicates the run is still in progress or hung. Subtract lastRunStartDate from this to get the run duration.
+    synonyms:
+      - last run end date
+      - job end time
+      - batch end time
+      - end date
+      - completion time
+      - finish time
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "2024-09-18T09:00:24.715Z"
+
+  # Execution diagnostics.
+  misc:
+    type: string
+    description: Raw Spring Batch StepExecution summary string for the most recent run, listing each step with its name, status, exitStatus, read/write/filter/skip counts, commit and rollback counts, and exitDescription. Use this for step level troubleshooting and to find the failure reason when lastRunStatus is FAILED - the exitDescription usually carries the stack trace or error message. Long, unstructured text, so return it only when the user asks about step details or a failure cause.
+    synonyms:
+      - misc
+      - step execution
+      - step details
+      - step status
+      - exit description
+      - error details
+      - failure reason
+      - stack trace
+      - execution details
+      - read count
+      - write count
+      - skip count
+    searchable: true
+    filterable: false
+    sortable: false
+    return_by_default: false
+    pii: false
+    allow_regex: true
+  batchInfo:
+    type: object
+    description: Free form key/value map for job specific run parameters and metadata. Commonly empty. Inspect it only when the user asks for batch parameters or extra job context.
+    synonyms:
+      - batch info
+      - job info
+      - batch parameters
+      - job parameters
+      - batch metadata
+    searchable: false
+    filterable: false
+    sortable: false
+    return_by_default: false
+    pii: false
+
+  # Technical persistence metadata.
+  _class:
+    type: string
+    description: Java class used by Spring Data to persist the document. Technical metadata only - not useful for business questions and should not be returned unless explicitly requested.
+    synonyms:
+      - class
+      - java class
+      - document class
+      - _class
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - com.albertsons.ecommerce.oscoprocessor.domain.BatchModel
+
+sample_queries:
+  - user_request: show all batch jobs
+    target:
+      database: osco
+      collection: batchjob
+      filter: {}
+      fields:
+        - batchId
+        - batchName
+        - lastRunStatus
+        - lastRunStartDate
+        - lastRunEndDate
+  - user_request: find batch job with batch id 1
+    target:
+      database: osco
+      collection: batchjob
+      filter:
+        batchId: 1
+  - user_request: get details of ORDER_EOD_CANCEL_JOB_FOR_RESCHEDULE_CUTOFF
+    target:
+      database: osco
+      collection: batchjob
+      filter:
+        batchName: ORDER_EOD_CANCEL_JOB_FOR_RESCHEDULE_CUTOFF
+  - user_request: show me the EOD cancel job
+    target:
+      database: osco
+      collection: batchjob
+      filter:
+        batchName:
+          $regex: EOD_CANCEL
+          $options: i
+  - user_request: which batch jobs failed
+    target:
+      database: osco
+      collection: batchjob
+      filter:
+        lastRunStatus: FAILED
+      fields:
+        - batchId
+        - batchName
+        - lastRunStatus
+        - lastRunStartDate
+        - lastRunEndDate
+  - user_request: what is the last run status of batch job 1
+    target:
+      database: osco
+      collection: batchjob
+      filter:
+        batchId: 1
+      fields:
+        - batchName
+        - lastRunStatus
+        - lastRunStartDate
+        - lastRunEndDate
+  - user_request: when did the reschedule cutoff job last run
+    target:
+      database: osco
+      collection: batchjob
+      filter:
+        batchName:
+          $regex: RESCHEDULE_CUTOFF
+          $options: i
+      fields:
+        - batchName
+        - lastRunStartDate
+        - lastRunEndDate
+        - lastRunStatus
+  - user_request: show batch jobs that ran on 2024-09-18
+    target:
+      database: osco
+      collection: batchjob
+      filter:
+        lastRunStartDate:
+          $gte: "2024-09-18T00:00:00.000Z"
+          $lt: "2024-09-19T00:00:00.000Z"
+  - user_request: show the most recently run batch jobs
+    target:
+      database: osco
+      collection: batchjob
+      filter: {}
+      sort:
+        lastRunStartDate: -1
+  - user_request: which batch jobs are currently running
+    target:
+      database: osco
+      collection: batchjob
+      filter:
+        lastRunStatus:
+          $in:
+            - STARTED
+            - STARTING
+  - user_request: why did the EOD cancel job fail
+    target:
+      database: osco
+      collection: batchjob
+      filter:
+        batchName:
+          $regex: EOD_CANCEL
+          $options: i
+      fields:
+        - batchName
+        - lastRunStatus
+        - lastRunStartDate
+        - lastRunEndDate
+        - misc
+  - user_request: show step execution details for batch job 1
+    target:
+      database: osco
+      collection: batchjob
+      filter:
+        batchId: 1
+      fields:
+        - batchName
+        - lastRunStatus
+        - misc
+
+# Sample batchjob document (reference used to build this schema - kept for context):
+# {
+#   "_id": { "$oid": "66ea96a84badec581a4ac52c" },
+#   "batchId": 1,
+#   "batchName": "ORDER_EOD_CANCEL_JOB_FOR_RESCHEDULE_CUTOFF",
+#   "batchDescription": "ORDER_EOD_CANCEL_JOB_FOR_RESCHEDULE_CUTOFF",
+#   "lastRunStatus": "COMPLETED",
+#   "lastRunStartDate": { "$date": "2024-09-18T09:00:15.616Z" },
+#   "lastRunEndDate": { "$date": "2024-09-18T09:00:24.715Z" },
+#   "misc": "[StepExecution: id=1, version=3, name=STEP_CANCEL_ORDER, status=COMPLETED, exitStatus=COMPLETED, readCount=0, filterCount=0, writeCount=0 readSkipCount=0, writeSkipCount=0, processSkipCount=0, commitCount=1, rollbackCount=0, exitDescription=, StepExecution: id=2, version=3, name=callUpdateEodOrdersCancelApiTasklet, status=COMPLETED, exitStatus=COMPLETED, readCount=0, filterCount=0, writeCount=0 readSkipCount=0, writeSkipCount=0, processSkipCount=0, commitCount=1, rollbackCount=0, exitDescription=]",
+#   "batchInfo": {},
+#   "_class": "com.albertsons.ecommerce.oscoprocessor.domain.BatchModel"
+# }

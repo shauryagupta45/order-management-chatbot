@@ -1,28 +1,567 @@
 database: osco
 collection: events
 display_name: Events
-description: Starter schema for the osco.events collection.
+description: >-
+  OSCO order event log. One document per order lifecycle event emitted or received by OSCO, keyed by event type
+  (eventId) and stamped with the order/fulfillment order it belongs to, the store, the emitting system, and an
+  event specific payload (eventData). Use this collection to build an order timeline, to prove that a specific
+  event fired for an order, to find when a status transition happened, and to inspect the payload carried by
+  that event. Many documents exist per order - one per event occurrence - so results are usually a list, not a
+  single record.
 business_context:
-  primary_entity: event
+  primary_entity: order event
   common_user_phrases:
-    - osco events
-    - events
-  when_to_use: Use for questions specifically about OSCO event records.
+    - show events for order
+    - order timeline
+    - event history for order
+    - what events fired for order
+    - when was the order accepted
+    - order accepted event
+    - did the order get accepted
+    - show ORDER_ACCEPTED events
+    - latest event for order
+    - last event for order
+    - events for fulfillment order
+    - events by store
+    - events today
+    - event payload for order
+    - event data for order
+    - what fulfillment system handled the order
+    - stage by time from event
+    - events from osco
+    - aps instance for order
+    - event source
+  when_to_use: >-
+    Use this collection for order event/timeline questions - listing all events for an order or fulfillment
+    order, checking whether and when a particular event type fired, ordering events chronologically to trace an
+    order's progress, filtering events by type, store, source system, or date range, and reading the event
+    specific payload under eventData.
+  when_not_to_use: >-
+    Do not use for the current state of an order. This collection records point in time events, not the order's
+    present status - an event proves something happened, but the authoritative current status, customer,
+    payment, and order line data live on the osco.order collection. Also note the eventData payload is a
+    partial snapshot captured at event time and may be stale relative to the order document. For fulfillment
+    side events use the orderff.events collection, and for monitoring/alerting events use
+    orderff.monitoring_events.
 aliases:
   - events
-  - osco events
+  - event
+  - order events
+  - order event
+  - event log
+  - event history
+  - order timeline
+  - timeline
+  - order history events
+  - lifecycle events
 identity:
   primary_key: _id
-default_limit: 10
+  business_keys:
+    - orderNumber
+    - fulfillmentOrderNumber
+default_sort:
+  field: eventCreatedDate
+  direction: desc
+default_limit: 25
 fields:
+  # Notes on this collection:
+  # - eventId is an event TYPE name (for example ORDER_ACCEPTED), not a unique document id. Many documents
+  #   share the same eventId. Use _id for uniqueness.
+  # - eventData is a free-form map whose keys vary by event type. Only the keys observed on ORDER_ACCEPTED are
+  #   declared below; other event types carry different keys.
+  # - eventData values are stored as strings, including booleans and timestamps. Filter them with quoted
+  #   string values, not booleans or date objects.
+  # - versionNumber and subOrderNumber are stored as strings here, but as integers on the osco.order
+  #   collection. Quote them when filtering this collection.
+
+  # Mongo document identity.
   _id:
     type: objectId
-    description: MongoDB internal document id.
+    description: MongoDB internal document id. The only truly unique identifier on this collection. Use only when the user explicitly provides a Mongo document id/ObjectId.
     synonyms:
       - mongo id
       - document id
+      - object id
+      - _id
     searchable: true
     filterable: true
+    sortable: false
     return_by_default: true
     pii: false
+    exact_match: true
+    examples:
+      - 6a4b363ca162d7227ea7e72f
 
+  # Order identifiers linking the event back to the order.
+  orderNumber:
+    type: string
+    description: >-
+      Customer order number the event belongs to. Prefer this field when the user says order number, order id,
+      or asks for the events/timeline of an order. Same identifier as orderNumber on the osco.order collection.
+      Stored as a string, so quote the value when filtering.
+    synonyms:
+      - order number
+      - order no
+      - order id
+      - customer order id
+      - order reference
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "179222848"
+  fulfillmentOrderNumber:
+    type: string
+    description: >-
+      Fulfillment order number the event belongs to. Typically the order number with a sub-order/version suffix
+      appended. Use this when the user supplies a fulfillment order id or asks for events of a specific
+      fulfillment order rather than the whole customer order.
+    synonyms:
+      - fulfillment order number
+      - fulfillment order id
+      - ff order number
+      - sub order fulfillment id
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "179222848011"
+  subOrderNumber:
+    type: string
+    description: >-
+      Sub-order number within the order that this event relates to. Stored as a string on this collection
+      (integer on osco.order), so quote the value when filtering.
+    synonyms:
+      - sub order number
+      - suborder number
+      - sub order id
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "1"
+  versionNumber:
+    type: string
+    description: >-
+      Business order version number at the time of the event. Use this to distinguish events belonging to
+      different edit versions of the same order. Stored as a string on this collection (integer on osco.order),
+      so quote the value when filtering. Do not confuse with a technical document version.
+    synonyms:
+      - order version
+      - version number
+      - business version
+      - edit version
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "1"
+  storeNumber:
+    type: string
+    description: >-
+      Store number associated with the order at the time of the event. Same identifier as storeNumber on
+      osco.order and storeId on osco.store. Stored as a string, so quote the value when filtering.
+    synonyms:
+      - store number
+      - store id
+      - store
+      - order store
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "2573"
+
+  # Event classification and timing. These are the main fields for timeline questions.
+  eventId:
+    type: string
+    description: >-
+      Event type name in upper snake case, such as ORDER_ACCEPTED. Despite the name this is a classification,
+      not a unique identifier - many documents share the same eventId. Prefer this field when the user names an
+      event or asks whether a particular thing happened to an order. Supports regex/partial matching because
+      users rarely type the full event name.
+    synonyms:
+      - event id
+      - event name
+      - event type
+      - event
+      - status event
+      - which event
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: false
+    allow_regex: true
+    indexed: true
+    examples:
+      - ORDER_ACCEPTED
+  eventCreatedDate:
+    type: datetime
+    description: >-
+      Timestamp (UTC) when the event was created. This is the field that orders an order's timeline - sort
+      ascending to walk the order's history forward, descending to get the most recent event. Also use it for
+      date range filters and for "when did X happen" questions.
+    synonyms:
+      - event created date
+      - event date
+      - event time
+      - event timestamp
+      - when did the event happen
+      - when was it
+      - occurred at
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "2026-07-06T04:59:40.625Z"
+  eventSource:
+    type: string
+    description: >-
+      System that produced the event. OSCO indicates the event originated in the OSCO service itself. Use this
+      to distinguish internally generated events from events received from upstream or downstream systems.
+    synonyms:
+      - event source
+      - source
+      - source system
+      - originating system
+      - produced by
+      - who sent the event
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - OSCO
+  apsInstance:
+    type: string
+    description: >-
+      APS (fulfillment platform) instance/region that handled the event, such as EAST. Use this when the user
+      asks which APS instance, region, or environment an order or event was processed on.
+    synonyms:
+      - aps instance
+      - aps
+      - instance
+      - region
+      - aps region
+      - which instance
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - EAST
+
+  # Event payload. Keys vary by event type; those below were observed on ORDER_ACCEPTED.
+  # All values are strings, including booleans and timestamps.
+  eventData.FULFILLMENT_SITE:
+    type: string
+    description: >-
+      Fulfillment site (store) that the order was routed to, captured in the event payload. Usually matches
+      storeNumber. Note the upper snake case key - the payload mixes naming styles, so use this exact path.
+    synonyms:
+      - fulfillment site
+      - FULFILLMENT_SITE
+      - site
+      - fulfillment store
+      - routed store
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "2573"
+  eventData.fulfillmentSystem:
+    type: string
+    description: >-
+      Fulfillment system handling the order at event time, such as APS. Same value domain as fulfillmentSystem
+      on osco.order, where ACUMTO denotes bakery orders.
+    synonyms:
+      - fulfillment system
+      - fulfillment platform
+      - handled by system
+      - aps
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - APS
+  eventData.LR_ID:
+    type: string
+    description: >-
+      Labor resource / logistics resource identifier carried by the event. Frequently null, so filter for
+      presence with {$ne: null} rather than assuming a value exists. Note the upper snake case key.
+    synonyms:
+      - lr id
+      - LR_ID
+      - labor resource id
+      - logistics resource id
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+  eventData.stagebyDateTime:
+    type: string
+    description: >-
+      Stage-by timestamp for the order as captured in the event payload, in ISO 8601 UTC form. Stored as a
+      string, not a date, so range comparisons are lexicographic on the ISO text rather than true date math -
+      prefer eventCreatedDate for date filtering. Note the lowercase b in "stageby", which differs from
+      stageByDateTime on osco.order.
+    synonyms:
+      - stage by date time
+      - stageby date time
+      - stage by time
+      - staging time
+      - stage by
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "2026-07-06T12:55:00.000Z"
+  eventData.isAutoReplenishment:
+    type: string
+    description: >-
+      Whether the order is an auto-replenishment order, as captured in the event payload. Stored as the string
+      "true" or "false", not a boolean - filter with the quoted string. The equivalent field on osco.order
+      (orderType.isAutoReplenishment) is a real boolean.
+    synonyms:
+      - auto replenishment
+      - auto replenish
+      - is auto replenishment
+      - subscription replenishment
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "false"
+      - "true"
+  eventData.serviceLevel:
+    type: string
+    description: >-
+      Service level of the order as captured in the event payload, such as REGULAR. Use this to distinguish
+      regular from expedited/express service on the event.
+    synonyms:
+      - service level
+      - service type
+      - express
+      - regular
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - REGULAR
+
+  # Technical persistence metadata.
+  _class:
+    type: string
+    description: Java class used by Spring Data to persist the document. Technical metadata only - not useful for business questions and should not be returned unless explicitly requested.
+    synonyms:
+      - class
+      - java class
+      - document class
+      - _class
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - com.albertsons.ecommerce.osco.model.Events
+
+sample_queries:
+  - user_request: show all events for order 179222848
+    target:
+      database: osco
+      collection: events
+      filter:
+        orderNumber: "179222848"
+      sort:
+        eventCreatedDate: 1
+  - user_request: order timeline for 179222848
+    target:
+      database: osco
+      collection: events
+      filter:
+        orderNumber: "179222848"
+      fields:
+        - orderNumber
+        - eventId
+        - eventCreatedDate
+        - eventSource
+      sort:
+        eventCreatedDate: 1
+  - user_request: what is the latest event for order 179222848
+    target:
+      database: osco
+      collection: events
+      filter:
+        orderNumber: "179222848"
+      sort:
+        eventCreatedDate: -1
+  - user_request: when was order 179222848 accepted
+    target:
+      database: osco
+      collection: events
+      filter:
+        orderNumber: "179222848"
+        eventId: ORDER_ACCEPTED
+      fields:
+        - orderNumber
+        - eventId
+        - eventCreatedDate
+  - user_request: did order 179222848 get accepted
+    target:
+      database: osco
+      collection: events
+      filter:
+        orderNumber: "179222848"
+        eventId: ORDER_ACCEPTED
+  - user_request: show events for fulfillment order 179222848011
+    target:
+      database: osco
+      collection: events
+      filter:
+        fulfillmentOrderNumber: "179222848011"
+      sort:
+        eventCreatedDate: 1
+  - user_request: show all cancel events
+    target:
+      database: osco
+      collection: events
+      filter:
+        eventId:
+          $regex: CANCEL
+          $options: i
+  - user_request: show ORDER_ACCEPTED events for store 2573
+    target:
+      database: osco
+      collection: events
+      filter:
+        eventId: ORDER_ACCEPTED
+        storeNumber: "2573"
+  - user_request: show events on 2026-07-06
+    target:
+      database: osco
+      collection: events
+      filter:
+        eventCreatedDate:
+          $gte: "2026-07-06T00:00:00.000Z"
+          $lt: "2026-07-07T00:00:00.000Z"
+  - user_request: show the event payload for order 179222848
+    target:
+      database: osco
+      collection: events
+      filter:
+        orderNumber: "179222848"
+      fields:
+        - orderNumber
+        - eventId
+        - eventCreatedDate
+        - eventData.FULFILLMENT_SITE
+        - eventData.fulfillmentSystem
+        - eventData.stagebyDateTime
+        - eventData.isAutoReplenishment
+        - eventData.serviceLevel
+  - user_request: what fulfillment system handled order 179222848
+    target:
+      database: osco
+      collection: events
+      filter:
+        orderNumber: "179222848"
+      fields:
+        - orderNumber
+        - eventId
+        - eventData.fulfillmentSystem
+  - user_request: show events for version 1 of order 179222848
+    target:
+      database: osco
+      collection: events
+      filter:
+        orderNumber: "179222848"
+        versionNumber: "1"
+      sort:
+        eventCreatedDate: 1
+  - user_request: show auto replenishment order events
+    target:
+      database: osco
+      collection: events
+      filter:
+        eventData.isAutoReplenishment: "true"
+  - user_request: show events from the EAST aps instance
+    target:
+      database: osco
+      collection: events
+      filter:
+        apsInstance: EAST
+  - user_request: show events produced by OSCO for order 179222848
+    target:
+      database: osco
+      collection: events
+      filter:
+        orderNumber: "179222848"
+        eventSource: OSCO
+
+# Sample events document (reference used to build this schema - kept for context):
+# {
+#   "_id": { "$oid": "6a4b363ca162d7227ea7e72f" },
+#   "orderNumber": "179222848",
+#   "fulfillmentOrderNumber": "179222848011",
+#   "versionNumber": "1",
+#   "subOrderNumber": "1",
+#   "storeNumber": "2573",
+#   "eventSource": "OSCO",
+#   "eventCreatedDate": { "$date": "2026-07-06T04:59:40.625Z" },
+#   "eventId": "ORDER_ACCEPTED",
+#   "eventData": {
+#     "FULFILLMENT_SITE": "2573",
+#     "fulfillmentSystem": "APS",
+#     "LR_ID": null,
+#     "stagebyDateTime": "2026-07-06T12:55:00.000Z",
+#     "isAutoReplenishment": "false",
+#     "serviceLevel": "REGULAR"
+#   },
+#   "apsInstance": "EAST",
+#   "_class": "com.albertsons.ecommerce.osco.model.Events"
+# }
