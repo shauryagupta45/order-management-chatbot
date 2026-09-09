@@ -1,28 +1,432 @@
 database: osco
 collection: ccpa_audit_rits
 display_name: CCPA Audit RITS
-description: Starter schema for the osco.ccpa_audit_rits collection.
+description: >-
+  CCPA (California Consumer Privacy Act) privacy request audit trail. One record per privacy data subject
+  request received from OneTrust and processed by the OSCO CCPA service, linking the RIT number to the
+  affected customer ids, the request type (for example right to delete), the processing status, the async
+  task id, and who created/modified the record and when. Use this collection to prove or trace that a
+  privacy request was received and completed, and to look up privacy requests by RIT number or customer id.
 business_context:
-  primary_entity: ccpa audit rits
+  primary_entity: ccpa audit rit
   common_user_phrases:
-    - ccpa audit rits
-    - ccpa audit
-  when_to_use: Use for questions specifically about OSCO CCPA audit RITS records.
+    - find rit
+    - look up rit number
+    - ccpa request status
+    - status of rit
+    - privacy request status
+    - show ccpa requests for customer
+    - was the customer data deleted
+    - did the ccpa request complete
+    - right to delete request
+    - data deletion request
+    - show pending ccpa requests
+    - ccpa requests created today
+    - which customers are in this rit
+    - who created the ccpa request
+    - find ccpa request by task id
+    - ccpa audit record
+    - onetrust request
+    - show all ccpa requests
+  when_to_use: >-
+    Use this collection for CCPA/privacy data subject request questions - looking a request up by ritNumber,
+    taskId, or customerId, checking whether a privacy request has been processed (ritStatus), identifying the
+    request type, listing requests in a date range, and answering audit/compliance questions about when a
+    request arrived and when it was last updated.
+  when_not_to_use: >-
+    Do not use for order or customer profile data. This collection records only the privacy request and its
+    processing state - it does not contain the customer's personal data, nor the orders or records that were
+    deleted or exported as a result. For order level questions about a customer use the osco.order collection.
+    For the batch/scheduled jobs that drive processing use osco.batchjob, and for outbound API failures during
+    processing use osco.failed_apis.
 aliases:
+  - ccpa_audit_rits
   - ccpa audit rits
   - ccpa audit
+  - ccpa
+  - ccpa request
+  - ccpa requests
+  - rit
+  - rits
+  - rit number
+  - privacy request
+  - privacy requests
+  - data subject request
+  - dsar
+  - right to delete
+  - onetrust request
 identity:
   primary_key: _id
+  business_keys:
+    - ritNumber
+    - taskId
+    - customerIds.customerId
+default_sort:
+  field: audit.createDate
+  direction: desc
 default_limit: 10
 fields:
+  # Mongo document identity.
   _id:
     type: objectId
-    description: MongoDB internal document id.
+    description: MongoDB internal document id. Use only when the user explicitly provides a Mongo document id/ObjectId.
     synonyms:
       - mongo id
       - document id
+      - object id
+      - _id
     searchable: true
     filterable: true
+    sortable: false
     return_by_default: true
     pii: false
+    exact_match: true
+    examples:
+      - 6a4b404db0e1e2b66f127318
 
+  # Primary privacy request identifiers.
+  ritNumber:
+    type: string
+    description: >-
+      Primary business identifier of the privacy request, assigned upstream by OneTrust. Prefer this field
+      whenever the user says RIT, RIT number, request number, or privacy request id. Short uppercase
+      alphanumeric code, so match it exactly and uppercase user input before filtering.
+    synonyms:
+      - rit
+      - rit number
+      - rit no
+      - rit id
+      - request number
+      - request id
+      - privacy request id
+      - ccpa request number
+      - onetrust request number
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - DX9E49WVXV
+  taskId:
+    type: string
+    description: >-
+      UUID of the asynchronous processing task that handles this privacy request. Use this to correlate the
+      request with processing logs or when the user supplies a task id/UUID rather than a RIT number.
+    synonyms:
+      - task id
+      - task uuid
+      - processing task id
+      - job task id
+      - correlation id
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - c07dc0d2-a666-412a-a342-00fd1a45139e
+
+  # Request state and classification.
+  ritStatus:
+    type: string
+    description: >-
+      Processing status of the privacy request. DONE is the observed terminal status, meaning the request has
+      been fully processed. Other in-flight or failure statuses may exist in the data; when the user asks for
+      anything other than completed requests, filter with a negation such as {$ne: "DONE"} rather than
+      guessing a specific status string, or first look at the distinct values present.
+    synonyms:
+      - rit status
+      - status
+      - request status
+      - ccpa status
+      - privacy request status
+      - processing status
+      - is it done
+      - is it complete
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - DONE
+  requestType:
+    type: string
+    description: >-
+      Type of privacy request as classified by OneTrust. RTDALL is the observed value and denotes a right to
+      delete request covering all of the customer's data. Other right to delete / right to know variants may
+      appear with different codes, so treat this as an open code set - prefix match on RTD for deletion
+      requests and RTK for know/access requests rather than assuming a fixed list.
+    synonyms:
+      - request type
+      - ccpa request type
+      - privacy request type
+      - type of request
+      - rtdall
+      - right to delete
+      - right to know
+      - deletion request
+      - data access request
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    allow_regex: true
+    indexed: true
+    examples:
+      - RTDALL
+
+  # Customers covered by the request. Array of objects, so one request can cover multiple customer ids.
+  customerIds.customerId:
+    type: string
+    description: >-
+      Customer account identifier covered by this privacy request. customerIds is an array, so a single RIT can
+      cover more than one customer id; a filter on this path matches a request if any element matches. Use this
+      when the user asks which privacy requests exist for a customer, or which customers a RIT covers. Same
+      identifier as customer.customerId on the osco.order collection.
+    synonyms:
+      - customer id
+      - customer ids
+      - account id
+      - customer number
+      - user id
+      - customer
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - 558-082-1635286820769
+
+  # Audit trail. Use these for when/by whom questions.
+  audit.createDate:
+    type: datetime
+    description: >-
+      Timestamp (UTC) when the privacy request audit record was created, that is when OSCO received the request.
+      Use this for "when did the request come in", for date range filters on privacy requests, and as the
+      default sort for recency.
+    synonyms:
+      - create date
+      - created date
+      - created on
+      - request received date
+      - when was it created
+      - date of request
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "2026-07-06T05:42:37.537Z"
+  audit.modifiedDate:
+    type: datetime
+    description: >-
+      Timestamp (UTC) when the audit record was last updated. Equal to audit.createDate for requests that were
+      processed in a single pass. A modifiedDate significantly later than createDate indicates the request was
+      updated or retried after intake.
+    synonyms:
+      - modified date
+      - last modified
+      - updated date
+      - last updated
+      - when was it last changed
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "2026-07-06T05:42:37.537Z"
+  audit.createdBy:
+    type: string
+    description: >-
+      Identifier of the system or user that created the audit record. CCPA_ONETRUST_API indicates the record was
+      created by the inbound OneTrust API integration. Use this to distinguish automated intake from manual entries.
+    synonyms:
+      - created by
+      - source
+      - source system
+      - who created it
+      - requested by
+      - created by system
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - CCPA_ONETRUST_API
+  audit.modifiedBy:
+    type: string
+    description: Identifier of the system or user that last updated the audit record. Use this when the user asks who last changed or last touched a privacy request.
+    synonyms:
+      - modified by
+      - last modified by
+      - updated by
+      - who changed it
+      - who last touched it
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - CCPA_ONETRUST_API
+
+  # Technical persistence metadata.
+  _class:
+    type: string
+    description: Java class used by Spring Data to persist the document. Technical metadata only - not useful for business questions and should not be returned unless explicitly requested.
+    synonyms:
+      - class
+      - java class
+      - document class
+      - _class
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - com.albertsons.ecommerce.ccpa.model.AuditModel
+
+sample_queries:
+  - user_request: find rit DX9E49WVXV
+    target:
+      database: osco
+      collection: ccpa_audit_rits
+      filter:
+        ritNumber: DX9E49WVXV
+  - user_request: what is the status of rit number DX9E49WVXV
+    target:
+      database: osco
+      collection: ccpa_audit_rits
+      filter:
+        ritNumber: DX9E49WVXV
+      fields:
+        - ritNumber
+        - ritStatus
+        - requestType
+        - audit.createDate
+        - audit.modifiedDate
+  - user_request: show all ccpa requests for customer 558-082-1635286820769
+    target:
+      database: osco
+      collection: ccpa_audit_rits
+      filter:
+        customerIds.customerId: 558-082-1635286820769
+  - user_request: was the data deleted for customer 558-082-1635286820769
+    target:
+      database: osco
+      collection: ccpa_audit_rits
+      filter:
+        customerIds.customerId: 558-082-1635286820769
+        requestType: RTDALL
+      fields:
+        - ritNumber
+        - requestType
+        - ritStatus
+        - audit.createDate
+        - audit.modifiedDate
+  - user_request: which customers are covered by rit DX9E49WVXV
+    target:
+      database: osco
+      collection: ccpa_audit_rits
+      filter:
+        ritNumber: DX9E49WVXV
+      fields:
+        - ritNumber
+        - customerIds.customerId
+  - user_request: show completed ccpa requests
+    target:
+      database: osco
+      collection: ccpa_audit_rits
+      filter:
+        ritStatus: DONE
+  - user_request: show ccpa requests that are not done yet
+    target:
+      database: osco
+      collection: ccpa_audit_rits
+      filter:
+        ritStatus:
+          $ne: DONE
+      fields:
+        - ritNumber
+        - ritStatus
+        - requestType
+        - audit.createDate
+  - user_request: find ccpa request by task id c07dc0d2-a666-412a-a342-00fd1a45139e
+    target:
+      database: osco
+      collection: ccpa_audit_rits
+      filter:
+        taskId: c07dc0d2-a666-412a-a342-00fd1a45139e
+  - user_request: show all right to delete requests
+    target:
+      database: osco
+      collection: ccpa_audit_rits
+      filter:
+        requestType:
+          $regex: ^RTD
+          $options: i
+  - user_request: show ccpa requests created on 2026-07-06
+    target:
+      database: osco
+      collection: ccpa_audit_rits
+      filter:
+        audit.createDate:
+          $gte: "2026-07-06T00:00:00.000Z"
+          $lt: "2026-07-07T00:00:00.000Z"
+  - user_request: show the latest ccpa requests
+    target:
+      database: osco
+      collection: ccpa_audit_rits
+      filter: {}
+      sort:
+        audit.createDate: -1
+  - user_request: show ccpa requests received from onetrust
+    target:
+      database: osco
+      collection: ccpa_audit_rits
+      filter:
+        audit.createdBy: CCPA_ONETRUST_API
+      fields:
+        - ritNumber
+        - requestType
+        - ritStatus
+        - audit.createdBy
+        - audit.createDate
+
+# Sample ccpa_audit_rits document (reference used to build this schema - kept for context):
+# {
+#   "_id": { "$oid": "6a4b404db0e1e2b66f127318" },
+#   "ritNumber": "DX9E49WVXV",
+#   "ritStatus": "DONE",
+#   "customerIds": [
+#     { "customerId": "558-082-1635286820769" }
+#   ],
+#   "audit": {
+#     "createDate": { "$date": "2026-07-06T05:42:37.537Z" },
+#     "modifiedDate": { "$date": "2026-07-06T05:42:37.537Z" },
+#     "createdBy": "CCPA_ONETRUST_API",
+#     "modifiedBy": "CCPA_ONETRUST_API"
+#   },
+#   "requestType": "RTDALL",
+#   "taskId": "c07dc0d2-a666-412a-a342-00fd1a45139e",
+#   "_class": "com.albertsons.ecommerce.ccpa.model.AuditModel"
+# }

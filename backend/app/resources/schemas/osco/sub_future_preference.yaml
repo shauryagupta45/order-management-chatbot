@@ -1,28 +1,686 @@
 database: osco
 collection: sub_future_preference
-display_name: Sub Future Preference
-description: Starter schema for the osco.sub_future_preference collection.
+display_name: Substitution Future Preference
+description: >-
+  Customer substitution future preference records. One document per CUST_SUB_FUTURE_PREFERENCE event, capturing
+  the substitutions offered on an order, whether the customer approved or rejected each one, and whether the
+  customer chose to save that substitution as a standing preference for future orders
+  (saveAsFutureSubPreference). Each document carries a substitutions array pairing the originally ordered item
+  with the item that was substituted for it, including descriptions, quantities, UPCs, and the substituted item
+  price. Use this collection for substitution approval and future-substitution-preference questions.
 business_context:
-  primary_entity: subscription future preference
+  primary_entity: substitution future preference
   common_user_phrases:
-    - sub future preference
-    - subscription future preference
-  when_to_use: Use for questions specifically about OSCO subscription future preference records.
+    - show substitutions for order
+    - what was substituted on order
+    - substitution preference for customer
+    - future substitution preference
+    - saved substitution preferences
+    - did the customer approve the substitution
+    - approved substitutions
+    - rejected substitutions
+    - substitution approval status
+    - what item replaced the ordered item
+    - substituted item price
+    - substitutions saved for future orders
+    - customer sub preferences
+    - substitutions by store
+    - substitution events today
+    - sub preference for order
+  when_to_use: >-
+    Use this collection for substitution approval and future preference questions - listing the substitutions
+    on an order, seeing which ordered item was replaced by which substituted item, checking the customer's
+    approval status for a substitution, and finding substitutions the customer elected to save as a preference
+    for future orders. Look records up by orderNumber, fulfillmentOrderNumber, customerUUID, storeNumber, or
+    item id.
+  when_not_to_use: >-
+    Do not use for the order's own item lines or current fulfillment state. The authoritative order lines,
+    including ordered/fulfilled/shorted quantities and the per-line substitution code, live on the osco.order
+    collection under subOrders.orderLines. This collection records only the substitution preference event and
+    is a point in time snapshot. For whether a store has the approved substitutions feature enabled, see
+    storeInfo.isApprovedSubsEnabled on osco.store. For the general order event timeline use osco.events.
 aliases:
+  - sub_future_preference
   - sub future preference
-  - subscription future preference
+  - substitution preference
+  - substitution preferences
+  - future substitution preference
+  - future sub preference
+  - substitutions
+  - substitution
+  - subs
+  - approved subs
+  - customer sub preference
 identity:
   primary_key: _id
+  business_keys:
+    - orderNumber
+    - fulfillmentOrderNumber
+    - customerUUID
+default_sort:
+  field: eventTimeStamp
+  direction: desc
 default_limit: 10
 fields:
+  # Notes on this collection:
+  # - The substitution detail lives in the data.substitutions array, so one document can describe several
+  #   substituted items. A filter on a data.substitutions.* path matches the document if ANY element matches;
+  #   it does not by itself isolate which element matched.
+  # - Inside data.substitutions, quantities and prices are stored as STRINGS, not numbers. Filter them with
+  #   quoted values, and avoid numeric range comparisons on substitutedItemPrice - they compare
+  #   lexicographically, so "10.00" sorts before "6.99".
+  # - saveAsFutureSubPreference is a genuine boolean, unlike the string booleans found on osco.events.
+  # - versionNumber and subOrderNumber are integers here (matching osco.order), but strings on osco.events.
+  # - orderedUpcId and substitutedUpcId use inconsistent UPC formats - see their field notes before
+  #   filtering on a UPC.
+
+  # Mongo document identity.
   _id:
     type: objectId
-    description: MongoDB internal document id.
+    description: MongoDB internal document id. Use only when the user explicitly provides a Mongo document id/ObjectId.
     synonyms:
       - mongo id
       - document id
+      - object id
+      - _id
     searchable: true
     filterable: true
+    sortable: false
     return_by_default: true
     pii: false
+    exact_match: true
+    examples:
+      - 6a73150f63764784b60ca635
 
+  # Order identifiers linking the preference record back to the order.
+  orderNumber:
+    type: string
+    description: >-
+      Customer order number the substitutions belong to. Prefer this field when the user says order number,
+      order id, or asks about the substitutions on an order. Same identifier as orderNumber on osco.order.
+      Stored as a string, so quote the value when filtering.
+    synonyms:
+      - order number
+      - order no
+      - order id
+      - customer order id
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "183348731"
+  fulfillmentOrderNumber:
+    type: string
+    description: >-
+      Fulfillment order number the substitutions belong to. Typically the order number with a
+      sub-order/version suffix appended. Use this when the user supplies a fulfillment order id.
+    synonyms:
+      - fulfillment order number
+      - fulfillment order id
+      - ff order number
+      - sub order fulfillment id
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "183348731011"
+  subOrderNumber:
+    type: integer
+    description: >-
+      Sub-order number within the order that these substitutions relate to. Stored as an integer here, matching
+      osco.order, but as a string on osco.events - do not quote the value when filtering this collection.
+    synonyms:
+      - sub order number
+      - suborder number
+      - sub order id
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - 1
+  versionNumber:
+    type: integer
+    description: >-
+      Business order version number at the time of the substitution event. Use this to distinguish
+      substitutions recorded against different edit versions of the same order. Stored as an integer here,
+      matching osco.order, but as a string on osco.events.
+    synonyms:
+      - order version
+      - version number
+      - business version
+      - edit version
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - 1
+  storeNumber:
+    type: string
+    description: >-
+      Store number associated with the order. Zero padded four character string, so "0901" will not match a
+      filter of "901" or 901 - pad the value to four characters before filtering. Same identifier as storeId on
+      osco.store.
+    synonyms:
+      - store number
+      - store id
+      - store
+      - order store
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "0901"
+
+  # Customer identity. Sensitive - filterable but not returned.
+  customerUUID:
+    type: string
+    description: >-
+      Customer UUID whose substitution preference this record captures. This is the only customer identifier on
+      the collection - there is no plain customerId here, unlike osco.order. Treat as a sensitive customer
+      identifier: use it to filter when the user supplies a UUID, but do not return it.
+    synonyms:
+      - customer uuid
+      - customer guid
+      - customer id
+      - customer identifier
+      - customer
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: true
+    sensitive: true
+    exact_match: true
+
+  # Event classification and timing.
+  event:
+    type: string
+    description: >-
+      Event type that produced this record. CUST_SUB_FUTURE_PREFERENCE is the observed value, denoting a
+      customer substitution future preference event. Note the field is named "event" here, not "eventId" as on
+      osco.events. Since this collection appears to carry a single event type, filtering on it is usually
+      unnecessary.
+    synonyms:
+      - event
+      - event name
+      - event type
+      - event id
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    allow_regex: true
+    examples:
+      - CUST_SUB_FUTURE_PREFERENCE
+  eventTimeStamp:
+    type: datetime
+    description: >-
+      Timestamp (UTC) when the substitution preference event occurred. Use this for "when was the substitution
+      approved", for date range filters, and as the default sort for recency. Note the capital S in "TimeStamp".
+    synonyms:
+      - event timestamp
+      - event time
+      - event date
+      - when did it happen
+      - substitution date
+      - preference date
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "2026-08-05T10:48:47.795Z"
+  source:
+    type: string
+    description: >-
+      System that produced the event. OSS is the observed value. Note this differs from the eventSource field
+      on osco.events, which carries OSCO for internally generated events.
+    synonyms:
+      - source
+      - source system
+      - originating system
+      - event source
+      - who sent it
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - OSS
+
+  # Substituted item detail. Array of objects - one entry per substituted order line.
+  # Quantities, prices, and entry ids are all strings.
+  data.substitutions.orderedItemId:
+    type: string
+    description: >-
+      Item id of the item the customer originally ordered, before substitution. Use this when the user asks
+      what was substituted for a given item, or which orders substituted a particular item. Same identifier
+      domain as subOrders.orderLines.itemId on osco.order.
+    synonyms:
+      - ordered item id
+      - original item id
+      - originally ordered item
+      - ordered sku
+      - ordered product id
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "970587973"
+  data.substitutions.orderedItemDescription:
+    type: string
+    description: >-
+      Human readable description of the originally ordered item. Use this for item name searches; supports
+      regex/partial matching because users type product names loosely.
+    synonyms:
+      - ordered item description
+      - ordered item name
+      - original item description
+      - original item name
+      - ordered product name
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    allow_regex: true
+    examples:
+      - Gimme Seasalt Roasted Seaweed Snack 5 piece - 0.7 Oz
+  data.substitutions.orderedQuantity:
+    type: string
+    description: >-
+      Quantity of the originally ordered item. Stored as a string, so filter with a quoted value and avoid
+      numeric range comparisons.
+    synonyms:
+      - ordered quantity
+      - ordered qty
+      - original quantity
+      - quantity ordered
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "2"
+  data.substitutions.orderedUpcId:
+    type: string
+    description: >-
+      UPC of the originally ordered item. Observed as a zero padded 13 character string. Note that
+      substitutedUpcId on the same record is NOT zero padded, so the two UPC fields use different formats -
+      when the user gives a bare UPC, try it both with and without the leading zero rather than assuming.
+    synonyms:
+      - ordered upc
+      - ordered upc id
+      - original upc
+      - upc
+      - barcode
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    allow_regex: true
+    examples:
+      - "0085002344612"
+  data.substitutions.substitutedItemId:
+    type: string
+    description: >-
+      Item id of the replacement item actually provided to the customer. Use this when the user asks what item
+      was given instead, or which orders received a particular substitute item.
+    synonyms:
+      - substituted item id
+      - substitute item id
+      - replacement item id
+      - sub item id
+      - substituted sku
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "970587967"
+  data.substitutions.substitutedItemDescription:
+    type: string
+    description: >-
+      Human readable description of the replacement item. Use this for item name searches on the substitute;
+      supports regex/partial matching.
+    synonyms:
+      - substituted item description
+      - substitute item description
+      - substituted item name
+      - replacement item name
+      - what was given instead
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    allow_regex: true
+    examples:
+      - Gimme Avocado And Seasalt Seaweed Roasted Snack 5 piece - 0.7 Oz
+  data.substitutions.substitutedQuantity:
+    type: string
+    description: >-
+      Quantity of the replacement item provided. Stored as a string. Compare against orderedQuantity to spot
+      partial substitutions, but do so on the returned values rather than with a numeric query operator.
+    synonyms:
+      - substituted quantity
+      - substitute quantity
+      - replacement quantity
+      - sub qty
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "2"
+  data.substitutions.substitutedUpcId:
+    type: string
+    description: >-
+      UPC of the replacement item. Observed as a 12 character string with no leading zero, unlike the zero
+      padded orderedUpcId on the same record. Try a user supplied UPC both with and without a leading zero.
+    synonyms:
+      - substituted upc
+      - substitute upc id
+      - replacement upc
+      - sub upc
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    allow_regex: true
+    examples:
+      - "850023446152"
+  data.substitutions.substitutedItemPrice:
+    type: string
+    description: >-
+      Unit price of the replacement item, as a decimal string in the order's currency. Stored as a string, so
+      numeric range filters compare lexicographically and are unreliable ("10.00" sorts before "6.99"). For
+      "substitutions over $X" style questions, return the values and compare them after retrieval rather than
+      filtering with $gt/$lt.
+    synonyms:
+      - substituted item price
+      - substitute price
+      - replacement price
+      - sub item price
+      - price of the substitute
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - "6.99"
+  data.substitutions.substitutedEntryId:
+    type: string
+    description: >-
+      Entry/line index of the substitution within the event payload, as a string. Technical sequencing value,
+      not a business identifier - return only if the user asks for it.
+    synonyms:
+      - substituted entry id
+      - entry id
+      - substitution entry
+      - line index
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - "0"
+  data.substitutions.subApprovalStatus:
+    type: string
+    description: >-
+      Customer's approval decision for this substitution. APPROVED is the observed value, meaning the customer
+      accepted the substitute. Rejected and pending states are expected to exist with different values; when
+      the user asks for anything other than approved, filter with a negation such as {$ne: "APPROVED"} rather
+      than guessing a specific status string.
+    synonyms:
+      - sub approval status
+      - substitution approval status
+      - approval status
+      - approved
+      - rejected
+      - did the customer approve
+      - substitution status
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - APPROVED
+  data.substitutions.saveAsFutureSubPreference:
+    type: boolean
+    description: >-
+      Whether the customer chose to save this substitution as a standing preference for future orders. This is
+      the defining field of the collection - use it for "saved for future" and "future substitution preference"
+      questions. A genuine boolean, so filter with true/false unquoted (unlike the string booleans on
+      osco.events).
+    synonyms:
+      - save as future sub preference
+      - future sub preference
+      - future substitution preference
+      - saved for future orders
+      - standing preference
+      - remember this substitution
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - true
+      - false
+
+  # Technical persistence metadata.
+  _class:
+    type: string
+    description: Java class used by Spring Data to persist the document. Technical metadata only - not useful for business questions and should not be returned unless explicitly requested.
+    synonyms:
+      - class
+      - java class
+      - document class
+      - _class
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - com.albertsons.ecommerce.osco.pricing.model.FutureSubPreferenceModel
+
+sample_queries:
+  - user_request: show substitutions for order 183348731
+    target:
+      database: osco
+      collection: sub_future_preference
+      filter:
+        orderNumber: "183348731"
+  - user_request: what was substituted on order 183348731
+    target:
+      database: osco
+      collection: sub_future_preference
+      filter:
+        orderNumber: "183348731"
+      fields:
+        - orderNumber
+        - eventTimeStamp
+        - data.substitutions.orderedItemId
+        - data.substitutions.orderedItemDescription
+        - data.substitutions.substitutedItemId
+        - data.substitutions.substitutedItemDescription
+        - data.substitutions.subApprovalStatus
+  - user_request: show substitutions for fulfillment order 183348731011
+    target:
+      database: osco
+      collection: sub_future_preference
+      filter:
+        fulfillmentOrderNumber: "183348731011"
+  - user_request: did the customer approve the substitution on order 183348731
+    target:
+      database: osco
+      collection: sub_future_preference
+      filter:
+        orderNumber: "183348731"
+      fields:
+        - orderNumber
+        - data.substitutions.orderedItemDescription
+        - data.substitutions.substitutedItemDescription
+        - data.substitutions.subApprovalStatus
+  - user_request: show approved substitutions
+    target:
+      database: osco
+      collection: sub_future_preference
+      filter:
+        data.substitutions.subApprovalStatus: APPROVED
+  - user_request: show substitutions that were not approved
+    target:
+      database: osco
+      collection: sub_future_preference
+      filter:
+        data.substitutions.subApprovalStatus:
+          $ne: APPROVED
+  - user_request: show substitutions saved as future preferences
+    target:
+      database: osco
+      collection: sub_future_preference
+      filter:
+        data.substitutions.saveAsFutureSubPreference: true
+  - user_request: show future substitution preferences for store 0901
+    target:
+      database: osco
+      collection: sub_future_preference
+      filter:
+        storeNumber: "0901"
+        data.substitutions.saveAsFutureSubPreference: true
+  - user_request: show substitution preferences for customer ac3e56da-331e-4950-9a36-c53815f1e59c
+    target:
+      database: osco
+      collection: sub_future_preference
+      filter:
+        customerUUID: ac3e56da-331e-4950-9a36-c53815f1e59c
+  - user_request: which orders substituted item 970587973
+    target:
+      database: osco
+      collection: sub_future_preference
+      filter:
+        data.substitutions.orderedItemId: "970587973"
+      fields:
+        - orderNumber
+        - eventTimeStamp
+        - data.substitutions.orderedItemId
+        - data.substitutions.substitutedItemId
+        - data.substitutions.substitutedItemDescription
+  - user_request: which orders received substitute item 970587967
+    target:
+      database: osco
+      collection: sub_future_preference
+      filter:
+        data.substitutions.substitutedItemId: "970587967"
+  - user_request: show substitutions for seaweed snacks
+    target:
+      database: osco
+      collection: sub_future_preference
+      filter:
+        data.substitutions.orderedItemDescription:
+          $regex: seaweed
+          $options: i
+  - user_request: show substitutions recorded on 2026-08-05
+    target:
+      database: osco
+      collection: sub_future_preference
+      filter:
+        eventTimeStamp:
+          $gte: "2026-08-05T00:00:00.000Z"
+          $lt: "2026-08-06T00:00:00.000Z"
+  - user_request: show the latest substitution preferences
+    target:
+      database: osco
+      collection: sub_future_preference
+      filter: {}
+      sort:
+        eventTimeStamp: -1
+  - user_request: show substituted item prices for order 183348731
+    target:
+      database: osco
+      collection: sub_future_preference
+      filter:
+        orderNumber: "183348731"
+      fields:
+        - orderNumber
+        - data.substitutions.substitutedItemDescription
+        - data.substitutions.substitutedQuantity
+        - data.substitutions.substitutedItemPrice
+
+# Sample sub_future_preference document (reference used to build this schema - kept for context):
+# {
+#   "_id": { "$oid": "6a73150f63764784b60ca635" },
+#   "orderNumber": "183348731",
+#   "versionNumber": 1,
+#   "subOrderNumber": 1,
+#   "fulfillmentOrderNumber": "183348731011",
+#   "event": "CUST_SUB_FUTURE_PREFERENCE",
+#   "eventTimeStamp": { "$date": "2026-08-05T10:48:47.795Z" },
+#   "customerUUID": "ac3e56da-331e-4950-9a36-c53815f1e59c",
+#   "source": "OSS",
+#   "storeNumber": "0901",
+#   "data": {
+#     "substitutions": [
+#       {
+#         "orderedItemId": "970587973",
+#         "orderedItemDescription": "Gimme Seasalt Roasted Seaweed Snack 5 piece - 0.7 Oz",
+#         "orderedQuantity": "2",
+#         "orderedUpcId": "0085002344612",
+#         "substitutedUpcId": "850023446152",
+#         "substitutedItemId": "970587967",
+#         "substitutedItemDescription": "Gimme Avocado And Seasalt Seaweed Roasted Snack 5 piece - 0.7 Oz",
+#         "substitutedQuantity": "2",
+#         "substitutedItemPrice": "6.99",
+#         "substitutedEntryId": "0",
+#         "subApprovalStatus": "APPROVED",
+#         "saveAsFutureSubPreference": true
+#       }
+#     ]
+#   },
+#   "_class": "com.albertsons.ecommerce.osco.pricing.model.FutureSubPreferenceModel"
+# }
