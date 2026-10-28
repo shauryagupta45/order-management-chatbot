@@ -80,6 +80,7 @@ def test_find_documents_tool_returns_raw_by_default() -> None:
         collection="order",
         filter={"_id": "507f1f77bcf86cd799439011"},
         limit=5,
+        sanitize=False,
     )
 
     assert result["count_returned"] == 1
@@ -95,7 +96,7 @@ def test_find_documents_tool_returns_raw_by_default() -> None:
     assert repository.last_projection is None
 
 
-def test_find_documents_tool_sanitizes_when_requested() -> None:
+def test_find_documents_tool_sanitizes_by_default() -> None:
     repository = FakeRepository()
     dependencies = build_test_dependencies(repository)
     mcp = FakeMcp()
@@ -106,7 +107,6 @@ def test_find_documents_tool_sanitizes_when_requested() -> None:
         collection="order",
         filter={"_id": "507f1f77bcf86cd799439011"},
         limit=5,
-        sanitize=True,
     )
 
     assert result["count_returned"] == 1

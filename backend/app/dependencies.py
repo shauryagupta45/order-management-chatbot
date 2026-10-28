@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from backend.app.catalog.yaml_schema_catalog import YamlSchemaCatalog
 from backend.app.config import Settings
+from backend.app.db.api_repository import ApiRepository
 from backend.app.db.mongo_client import MongoClientProvider
 from backend.app.db.mongo_repository import MongoRepository
 from backend.app.services.projection_policy import ProjectionPolicy
@@ -17,8 +18,8 @@ from backend.app.services.target_resolver import TargetResolver
 class AppDependencies:
     settings: Settings
     catalog: YamlSchemaCatalog
-    mongo_client_provider: MongoClientProvider
-    repository: MongoRepository
+    mongo_client_provider: MongoClientProvider | None
+    repository: ApiRepository | MongoRepository
     target_resolver: TargetResolver
     query_validator: QueryValidator
     projection_policy: ProjectionPolicy
@@ -29,8 +30,12 @@ class AppDependencies:
 def build_dependencies(settings: Settings | None = None) -> AppDependencies:
     resolved_settings = settings or Settings()
     catalog = YamlSchemaCatalog(resolved_settings.mcp_schema_resource_dir)
-    mongo_client_provider = MongoClientProvider(resolved_settings)
-    repository = MongoRepository(mongo_client_provider)
+    mongo_client_provider: MongoClientProvider | None = None
+    if resolved_settings.data_access_mode == "api":
+        repository: ApiRepository | MongoRepository = ApiRepository(resolved_settings)
+    else:
+        mongo_client_provider = MongoClientProvider(resolved_settings)
+        repository = MongoRepository(mongo_client_provider)
     return AppDependencies(
         settings=resolved_settings,
         catalog=catalog,

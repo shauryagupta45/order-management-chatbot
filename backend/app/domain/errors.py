@@ -18,6 +18,10 @@ class UnknownCollectionError(CatalogError):
         )
 
 
+class DataApiError(McpMongoError):
+    """Raised when the data API is unreachable, rejects the request, or returns an unusable response."""
+
+
 class ValidationError(McpMongoError):
     """Raised when a query violates catalog or safety rules."""
 

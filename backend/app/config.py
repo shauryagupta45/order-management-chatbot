@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -9,6 +10,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    # "api" sends validated queries to the data API; "mongodb" connects to MongoDB directly.
+    data_access_mode: Literal["api", "mongodb"] = Field(default="api", alias="DATA_ACCESS_MODE")
+    api_base_url: str | None = Field(default=None, alias="API_BASE_URL")
+    api_token: str | None = Field(default=None, alias="API_TOKEN")
+    api_username: str | None = Field(default=None, alias="API_USERNAME")
+    api_password: str | None = Field(default=None, alias="API_PASSWORD")
+    api_timeout_seconds: float = Field(default=60.0, alias="API_TIMEOUT_SECONDS")
     mongodb_uri: str | None = Field(default=None, alias="MONGODB_URI")
     mongodb_tls_ca_file: Path | None = Field(default=None, alias="MONGODB_TLS_CA_FILE")
     mcp_server_name: str = Field(default="mongodb-domain-mcp", alias="MCP_SERVER_NAME")
@@ -23,8 +31,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_runtime_settings(self) -> "Settings":
-        if not self.mongodb_uri:
-            raise ValueError("MONGODB_URI is required to start the MCP server.")
+        if self.data_access_mode == "api" and not self.api_base_url:
+            raise ValueError("API_BASE_URL is required when DATA_ACCESS_MODE=api.")
+        if self.data_access_mode == "mongodb" and not self.mongodb_uri:
+            raise ValueError("MONGODB_URI is required when DATA_ACCESS_MODE=mongodb.")
         if self.mcp_max_documents_per_query < 1:
             raise ValueError("MCP_MAX_DOCUMENTS_PER_QUERY must be at least 1.")
         if self.mcp_max_bytes_per_response < 1_000:
@@ -35,4 +45,5 @@ class Settings(BaseSettings):
 
 
 class LocalTestSettings(Settings):
+    api_base_url: str | None = "https://data-api.example.invalid"
     mongodb_uri: str | None = "mongodb://example.invalid:27017"
