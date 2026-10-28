@@ -1,27 +1,293 @@
 database: orderff
 collection: batchjob
-display_name: Batchjob
-description: Starter schema for the orderff.batchjob collection.
+display_name: Batch Job
+description: >-
+  Order fulfillment batch job runner state. One record per configured batch definition, where a batch
+  groups a set of store/site numbers to be processed together (see batchName/batchDescription), plus the
+  status and start time of that batch's most recent run. Use this collection to check whether a batch is
+  currently running, completed, or failed, to find which batch covers a given site number, and to see when
+  a batch last started or was last updated. This is fulfillment-processing infrastructure state, not order
+  or shipment data itself.
 business_context:
-  primary_entity: batchjob
+  primary_entity: batch job
   common_user_phrases:
-    - batchjob
-    - orderff batchjob
-  when_to_use: Use for questions specifically about orderff batchjob records.
+    - batch job status
+    - show batch jobs
+    - which batches are running
+    - batch job for site 3919
+    - last run status of batch
+    - batches that started running
+    - failed batch jobs
+    - completed batch jobs
+    - orderff batch job
+    - batch id 271
+    - when did this batch last run
+    - show all batch jobs
+  when_to_use: >-
+    Use for questions about order fulfillment batch job definitions and their most recent run - looking up
+    a batch by batchId or batchName, checking lastRunStatus (running/completed/failed), finding which batch
+    processes a given store/site number (site numbers appear inside batchName/batchDescription), and
+    filtering/sorting by when a batch last started or was last updated.
+  when_not_to_use: >-
+    Do not use for the actual work a batch performs. This collection only tracks the batch runner's own
+    state - it does not contain order, shipment, or picking data. For individual units of work use
+    orderff.task, for shipment records use orderff.shipment, for site master data use orderff.site, and for
+    processing event history use orderff.events.
 aliases:
   - batchjob
+  - batch job
+  - batch jobs
+  - orderff batchjob
+  - orderff batch job
+  - fulfillment batch job
+  - batch run
+  - batch runs
 identity:
   primary_key: _id
+  business_keys:
+    - batchId
+    - batchName
+default_sort:
+  field: lastRunStartDate
+  direction: desc
 default_limit: 10
 fields:
+  # Mongo document identity.
   _id:
     type: objectId
-    description: MongoDB internal document id.
+    description: MongoDB internal document id. Use only when the user explicitly provides a Mongo document id/ObjectId.
     synonyms:
       - mongo id
       - document id
+      - object id
+      - _id
     searchable: true
     filterable: true
+    sortable: false
     return_by_default: true
     pii: false
+    exact_match: true
+    examples:
+      - 657c6ea89f3325263c20f0b5
 
+  # Batch identity.
+  batchId:
+    type: integer
+    description: >-
+      Numeric identifier of the batch job definition. Stable across runs of the same batch. Prefer this
+      when the user gives a plain number as "batch id" or "batch".
+    synonyms:
+      - batch id
+      - batch number
+      - batch
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - 271
+  batchName:
+    type: string
+    description: >-
+      Human-readable name of the batch, typically encoding the comma-separated list of store/site numbers
+      this batch processes, for example "GROUP_SITES1062,3919,2446,2287,0996,0326,0027,1143,1624,1680". Use
+      this when the user asks which batch covers a given site/store number - match with a substring/regex
+      search rather than an exact match, since a batch name contains many site numbers.
+    synonyms:
+      - batch name
+      - batch group
+      - group sites
+      - batch for site
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    allow_regex: true
+    examples:
+      - "GROUP_SITES1062,3919,2446,2287,0996,0326,0027,1143,1624,1680"
+  batchDescription:
+    type: string
+    description: >-
+      Description of the batch job. Observed data shows this equal to batchName, so treat it as a
+      secondary/legacy copy of the batch name rather than distinct free text.
+    synonyms:
+      - batch description
+      - description
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    allow_regex: true
+    examples:
+      - "GROUP_SITES1062,3919,2446,2287,0996,0326,0027,1143,1624,1680"
+
+  # Most recent run state.
+  lastRunStatus:
+    type: string
+    description: >-
+      Status of the batch's most recent run. STARTED is the observed value, meaning the batch began running
+      and has not yet been recorded as finished. Other lifecycle statuses (for example COMPLETED or FAILED)
+      may exist in the data; when the user asks for anything other than a specific known status, filter with
+      a negation such as {$ne: "STARTED"} or first inspect the distinct values present rather than guessing.
+    synonyms:
+      - status
+      - last run status
+      - run status
+      - batch status
+      - is it running
+      - is it done
+      - did it fail
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - STARTED
+
+  # Timestamps.
+  lastRunStartDate:
+    type: datetime
+    description: >-
+      Timestamp (UTC) when the batch's most recent run started. Use this for "when did this batch last
+      run/start" and as the default recency sort.
+    synonyms:
+      - last run start date
+      - last run date
+      - run start date
+      - when did it start
+      - when did it last run
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "2023-12-15T15:20:08.099Z"
+  created:
+    type: datetime
+    description: Timestamp (UTC) when the batch job record was first created.
+    synonyms:
+      - created date
+      - created on
+      - when was it created
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "2023-12-15T15:20:08.100Z"
+  updated:
+    type: datetime
+    description: >-
+      Timestamp (UTC) when the batch job record was last updated. Close to lastRunStartDate when the run
+      just started; a later value indicates the record was touched again after the run began.
+    synonyms:
+      - updated date
+      - updated on
+      - last updated
+      - when was it last changed
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "2023-12-15T15:20:08.100Z"
+
+  # Technical persistence metadata.
+  _class:
+    type: string
+    description: Java class used by Spring Data to persist the document. Technical metadata only - not useful for business questions and should not be returned unless explicitly requested.
+    synonyms:
+      - class
+      - java class
+      - document class
+      - _class
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - com.albertsons.ecommerce.integration.model.entity.BatchModel
+
+sample_queries:
+  - user_request: show batch 271
+    target:
+      database: orderff
+      collection: batchjob
+      filter:
+        batchId: 271
+  - user_request: what is the status of batch 271
+    target:
+      database: orderff
+      collection: batchjob
+      filter:
+        batchId: 271
+      fields:
+        - batchId
+        - batchName
+        - lastRunStatus
+        - lastRunStartDate
+  - user_request: show batch jobs that are currently running
+    target:
+      database: orderff
+      collection: batchjob
+      filter:
+        lastRunStatus: STARTED
+  - user_request: show batch jobs that are not started
+    target:
+      database: orderff
+      collection: batchjob
+      filter:
+        lastRunStatus:
+          $ne: STARTED
+  - user_request: which batch covers site 3919
+    target:
+      database: orderff
+      collection: batchjob
+      filter:
+        batchName:
+          $regex: "3919"
+      fields:
+        - batchId
+        - batchName
+        - lastRunStatus
+  - user_request: show the most recently run batch jobs
+    target:
+      database: orderff
+      collection: batchjob
+      filter: {}
+      sort:
+        lastRunStartDate: -1
+  - user_request: show batch jobs that last ran on 2023-12-15
+    target:
+      database: orderff
+      collection: batchjob
+      filter:
+        lastRunStartDate:
+          $gte: "2023-12-15T00:00:00.000Z"
+          $lt: "2023-12-16T00:00:00.000Z"
+
+# Sample batchjob document (reference used to build this schema - kept for context):
+# {
+#   "_id": { "$oid": "657c6ea89f3325263c20f0b5" },
+#   "batchId": 271,
+#   "batchName": "GROUP_SITES1062,3919,2446,2287,0996,0326,0027,1143,1624,1680",
+#   "batchDescription": "GROUP_SITES1062,3919,2446,2287,0996,0326,0027,1143,1624,1680",
+#   "lastRunStatus": "STARTED",
+#   "lastRunStartDate": { "$date": "2023-12-15T15:20:08.099Z" },
+#   "created": { "$date": "2023-12-15T15:20:08.100Z" },
+#   "updated": { "$date": "2023-12-15T15:20:08.100Z" },
+#   "_class": "com.albertsons.ecommerce.integration.model.entity.BatchModel"
+# }

@@ -1,28 +1,300 @@
 database: orderff
 collection: business_rules
 display_name: Business Rules
-description: Starter schema for the orderff.business_rules collection.
+description: >-
+  Fulfillment business rule configuration. Each document is one rule variant for a specific combination of
+  fulfillment dimensions (fulfillment system, store type, fulfillment type, carrier, service level, slot
+  type, location types, and whether the order is on the promise platform), together with a rule name and the
+  numeric value that rule resolves to for that combination (ottValue). This is a rules/config lookup table
+  used by the fulfillment system to decide behavior for a given order shape - it is not order or shipment
+  data itself. A given rule name (for example ON_TIME_TILLING) can appear many times, once per dimension
+  combination it covers, so uniqueness is the combination of rule plus all dimension fields, not rule alone.
 business_context:
   primary_entity: business rule
   common_user_phrases:
     - business rules
     - fulfillment business rules
-  when_to_use: Use for questions specifically about orderff business rule records.
+    - on time tilling rule
+    - ott value
+    - rule for delivery
+    - rule for one hour slot
+    - rules for 3PL carrier
+    - promise platform rules
+    - rule for MFC
+    - rule for APS
+  when_to_use: >-
+    Use for questions about how a fulfillment business rule is configured - what value a rule resolves to
+    (ottValue) for a given combination of fulfillment system, store type, fulfillment type, carrier, service
+    level, slot type, or location type, and which rules apply to the promise platform versus not.
+  when_not_to_use: >-
+    Do not use for individual orders, tasks, or shipments - this collection only holds rule configuration,
+    not transactional records. For actual work items use orderff.task, for shipment records use
+    orderff.shipment, and for site master data use orderff.site.
 aliases:
   - business rules
+  - business rule
   - rules
+  - fulfillment rules
+  - on time tilling
+  - ott rules
 identity:
   primary_key: _id
+  business_keys:
+    - rule
 default_limit: 10
 fields:
+  # Mongo document identity.
   _id:
     type: objectId
-    description: MongoDB internal document id.
+    description: MongoDB internal document id. Use only when the user explicitly provides a Mongo document id/ObjectId.
     synonyms:
       - mongo id
       - document id
+      - object id
+      - _id
     searchable: true
     filterable: true
+    sortable: false
     return_by_default: true
     pii: false
+    exact_match: true
+    examples:
+      - 6397807bf78c0c0e3a133491
 
+  # Rule identity and the value it resolves to.
+  rule:
+    type: string
+    description: >-
+      Name/code of the business rule. ON_TIME_TILLING is the observed value, governing the on-time
+      threshold (ottValue) allowed for a fulfillment slot. Other rule names may exist in the data; treat
+      this as an open code set rather than a fixed list.
+    synonyms:
+      - rule name
+      - rule code
+      - business rule
+      - rule type
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - ON_TIME_TILLING
+  ottValue:
+    type: integer
+    description: >-
+      Numeric value the rule resolves to for its matching dimension combination. For ON_TIME_TILLING this
+      is the on-time threshold/tilling allowance associated with the slot; 0 means no allowance. Always
+      interpret alongside the rule field, since the same ottValue field is reused by different rule names
+      for different purposes.
+    synonyms:
+      - ott value
+      - ott
+      - rule value
+      - threshold value
+      - tilling value
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - 0
+
+  # Dimensions the rule is scoped to. A rule document matches orders whose attributes match all of these.
+  isPromisePlatform:
+    type: boolean
+    description: >-
+      Whether this rule variant applies to orders on the promise platform (true) or the legacy/non-promise
+      flow (false).
+    synonyms:
+      - promise platform
+      - is promise platform
+      - promise flow
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - false
+  fulfillmentSystem:
+    type: array
+    description: >-
+      Fulfillment system(s) this rule variant applies to, such as APS or MFC (micro-fulfillment center). A
+      document matches if the order's fulfillment system is any element of this array.
+    synonyms:
+      - fulfillment system
+      - fulfillment systems
+      - aps
+      - mfc
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - APS
+      - MFC
+  storeType:
+    type: string
+    description: >-
+      Store type this rule variant applies to, such as 1PL (first-party logistics). Other store type codes
+      may exist in the data.
+    synonyms:
+      - store type
+      - 1pl
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - 1PL
+  fulfillmentType:
+    type: string
+    description: >-
+      Fulfillment type this rule variant applies to, such as Delivery. Other fulfillment types (for example
+      pickup variants) may exist in the data.
+    synonyms:
+      - fulfillment type
+      - delivery
+      - pickup
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - Delivery
+  carrier:
+    type: string
+    description: >-
+      Carrier type this rule variant applies to, such as 3PL (third-party logistics carrier).
+    synonyms:
+      - carrier
+      - carrier type
+      - 3pl
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - 3PL
+  serviceLevel:
+    type: string
+    description: >-
+      Service level this rule variant applies to, such as REGULAR. Other service levels (for example
+      express/rush variants) may exist in the data.
+    synonyms:
+      - service level
+      - regular service
+      - service tier
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - REGULAR
+  slotType:
+    type: string
+    description: >-
+      Delivery/fulfillment slot type this rule variant applies to, such as ONEHR (one-hour slot). Other slot
+      types (for example longer windows or same-day) may exist in the data.
+    synonyms:
+      - slot type
+      - slot
+      - one hour slot
+      - delivery slot type
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - ONEHR
+  locationTypes:
+    type: array
+    description: >-
+      Location type(s) this rule variant is scoped to. Null/absent means the rule applies regardless of
+      location type rather than being restricted to specific ones.
+    synonyms:
+      - location types
+      - location type
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    examples: []
+
+sample_queries:
+  - user_request: show the on time tilling rule
+    target:
+      database: orderff
+      collection: business_rules
+      filter:
+        rule: ON_TIME_TILLING
+  - user_request: what is the ott value for one hour delivery slots
+    target:
+      database: orderff
+      collection: business_rules
+      filter:
+        rule: ON_TIME_TILLING
+        slotType: ONEHR
+        fulfillmentType: Delivery
+      fields:
+        - rule
+        - slotType
+        - fulfillmentType
+        - ottValue
+  - user_request: show business rules for aps
+    target:
+      database: orderff
+      collection: business_rules
+      filter:
+        fulfillmentSystem: APS
+  - user_request: show business rules for 3PL carrier with regular service level
+    target:
+      database: orderff
+      collection: business_rules
+      filter:
+        carrier: 3PL
+        serviceLevel: REGULAR
+  - user_request: show promise platform business rules
+    target:
+      database: orderff
+      collection: business_rules
+      filter:
+        isPromisePlatform: true
+  - user_request: show non promise platform rules for 1PL stores
+    target:
+      database: orderff
+      collection: business_rules
+      filter:
+        isPromisePlatform: false
+        storeType: 1PL
+
+# Sample business_rules document (reference used to build this schema - kept for context):
+# {
+#   "_id": { "$oid": "6397807bf78c0c0e3a133491" },
+#   "rule": "ON_TIME_TILLING",
+#   "isPromisePlatform": false,
+#   "fulfillmentSystem": ["APS", "MFC"],
+#   "storeType": "1PL",
+#   "fulfillmentType": "Delivery",
+#   "carrier": "3PL",
+#   "serviceLevel": "REGULAR",
+#   "slotType": "ONEHR",
+#   "locationTypes": null,
+#   "ottValue": 0
+# }

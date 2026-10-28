@@ -1,28 +1,520 @@
 database: orderff
 collection: completed_orderline
 display_name: Completed Orderline
-description: Starter schema for the orderff.completed_orderline collection.
+description: >-
+  Finalized picking/fulfillment result for order lines, recorded once picking for the line is complete. One
+  document per fulfillment-order + item combination (see _id), holding what was ordered (orderLine),
+  the picking outcome for each ordered item (pickingType, fulfilledQty) and the specific UPC(s) actually
+  picked with pick timestamps (orderLine.pickedItems), plus who performed the pick (userId) and a
+  pick/reason code (reasonCode). This is the completed result of fulfillment, not the order itself and not
+  an in-progress picking task.
 business_context:
   primary_entity: completed order line
   common_user_phrases:
     - completed orderline
     - completed order line
-  when_to_use: Use for questions specifically about completed order line records in orderff.
+    - show completed order lines for order
+    - what was picked for order
+    - picking status of item
+    - who picked order
+    - fully picked items
+    - reason code for order line
+    - when was this item picked
+    - picked upc for item
+    - completed order lines for store
+  when_to_use: >-
+    Use for questions about how an order line was actually fulfilled at the store - which UPC(s) were
+    picked for an ordered item, ordered quantity versus fulfilled quantity, the picking type (for example
+    FULLY_PICKED), who picked it (userId), when it was picked (orderLine.pickedItems.pickedTime), and the
+    reason/pick code (reasonCode) for a given order number, fulfillment order number, or store.
+  when_not_to_use: >-
+    Do not use for order-level attributes such as customer, address, or order totals - for those use
+    osco.order. Do not use for in-progress/not-yet-completed picking work - for that use orderff.task or
+    orderff.order_picking_status. This collection only records the finalized picking result for order lines
+    that have already been picked.
 aliases:
   - completed orderline
   - completed order line
+  - completed order lines
+  - picked order line
+  - order line picking result
+  - picking result
 identity:
   primary_key: _id
+  business_keys:
+    - orderNumber
+    - fulfillmentOrderNumber
+default_sort:
+  field: createdDate
+  direction: desc
 default_limit: 10
 fields:
+  # Document identity. _id is a composite key, not a generated ObjectId.
   _id:
-    type: objectId
-    description: MongoDB internal document id.
+    type: string
+    description: >-
+      Composite document id in the form "<fulfillmentOrderNumber>-<orderedItemId>", for example
+      "96056717011-136010013". Not a Mongo ObjectId. Use this only when the user supplies the exact
+      composite id string; otherwise prefer filtering by orderNumber/fulfillmentOrderNumber and item id.
     synonyms:
-      - mongo id
+      - id
       - document id
+      - composite id
+    searchable: true
+    filterable: true
+    sortable: false
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "96056717011-136010013"
+
+  # Order / fulfillment order identifiers and store.
+  orderNumber:
+    type: string
+    description: >-
+      Base order number, without the fulfillment sequence suffix. Use this when the user refers to "the
+      order" generally rather than a specific fulfillment order.
+    synonyms:
+      - order number
+      - order id
+      - order
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "96056717"
+  fulfillmentOrderNumber:
+    type: string
+    description: >-
+      Fulfillment order number, equal to orderNumber plus a fulfillment sequence suffix (for example
+      "96056717" -> "96056717011"). Use this when the user gives the longer fulfillment order id, or to
+      distinguish between multiple fulfillment orders split from the same base order.
+    synonyms:
+      - fulfillment order number
+      - fulfillment order id
+      - ff order number
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "96056717011"
+  storeNumber:
+    type: string
+    description: Store number where the order line was picked/fulfilled.
+    synonyms:
+      - store number
+      - store id
+      - store
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    indexed: true
+    examples:
+      - "0177"
+
+  # Actor and reason.
+  uuid:
+    type: string
+    description: >-
+      Intended to be a unique event identifier, but observed data often contains the literal placeholder
+      "uniqueID - Source to fill." rather than a real value. Treat as unreliable for lookups unless it
+      contains an actual UUID-shaped value.
+    synonyms:
+      - uuid
+      - event id
+      - unique id
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - "uniqueID - Source to fill."
+  userId:
+    type: string
+    description: Login/associate id of the user who performed the picking action for this order line.
+    synonyms:
+      - user id
+      - picked by
+      - associate id
+      - who picked it
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - vbhar03
+  reasonCode:
+    type: string
+    description: >-
+      Pick/reason code for the order line, observed as a "<PHASE>/<TYPE>" compound string such as
+      "PREPICK/REGULAR". Treat as an open code set; match the whole string with exact_match, or use a
+      prefix regex (for example ^PREPICK) when the user only names one part.
+    synonyms:
+      - reason code
+      - pick reason
+      - pick phase
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    allow_regex: true
+    examples:
+      - PREPICK/REGULAR
+
+  # Ordered item detail (orderLine is an array; one element per ordered item on this fulfillment order).
+  orderLine.orderedItemId:
+    type: string
+    description: Item id as originally ordered, on an order line.
+    synonyms:
+      - item id
+      - ordered item id
+      - sku
     searchable: true
     filterable: true
     return_by_default: true
     pii: false
+    exact_match: true
+    examples:
+      - "136010013"
+  orderLine.orderedUpcId:
+    type: string
+    description: UPC of the item as originally ordered. May differ from the UPC actually picked if the item was substituted.
+    synonyms:
+      - ordered upc
+      - upc
+      - ordered upc id
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "021130070107"
+  orderLine.orderedItemDescription:
+    type: string
+    description: Human-readable description of the ordered item.
+    synonyms:
+      - item description
+      - product description
+      - product name
+    searchable: true
+    filterable: false
+    return_by_default: true
+    pii: false
+    examples:
+      - Lucerne Milk - Half Gallon (container may vary)
+  orderLine.orderedQuantity:
+    type: integer
+    description: Quantity ordered for this item line.
+    synonyms:
+      - ordered quantity
+      - qty ordered
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - 1
+  orderLine.orderedItemTotalPrice:
+    type: decimal
+    description: Total price charged for the ordered quantity of this item line.
+    synonyms:
+      - item total price
+      - line price
+      - item price
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - 2.39
+  orderLine.fulfilledQty:
+    type: integer
+    description: >-
+      Quantity actually fulfilled/picked for this item line. Compare with orderLine.orderedQuantity to
+      detect shorted lines.
+    synonyms:
+      - fulfilled quantity
+      - picked quantity
+      - qty picked
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - 1
+  orderLine.pickingType:
+    type: string
+    description: >-
+      Outcome of the pick for this item line. FULLY_PICKED is the observed value, meaning the full ordered
+      quantity was picked. Other outcomes (for example partial pick or out-of-stock/substitution) may exist
+      in the data; treat as an open code set.
+    synonyms:
+      - picking type
+      - pick status
+      - pick outcome
+      - fully picked
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - FULLY_PICKED
+  orderLine.unitOfMeasure:
+    type: string
+    description: Unit of measure for the ordered item line, for example EA for each.
+    synonyms:
+      - unit of measure
+      - uom
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - EA
+  orderLine.orderedSellByWeightIndicator:
+    type: string
+    description: >-
+      Indicator of whether the ordered item is sold by weight. E is the observed value for an each/fixed-unit
+      item; a weight-sold item would use a different code.
+    synonyms:
+      - sell by weight
+      - sell by weight indicator
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - E
 
+  # Actual picked UPC detail (pickedItems is nested one level deeper, inside each orderLine element).
+  orderLine.pickedItems.pickedItemUpc:
+    type: string
+    description: >-
+      UPC of the item actually picked. Compare with orderLine.orderedUpcId to detect a substitution - they
+      differ when a different item/UPC was picked than what was ordered.
+    synonyms:
+      - picked upc
+      - fulfilled upc
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - "021130070107"
+  orderLine.pickedItems.upcQty:
+    type: integer
+    description: Quantity picked for this specific picked UPC.
+    synonyms:
+      - picked upc quantity
+      - upc quantity
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - 1
+  orderLine.pickedItems.sellByWeightIndicator:
+    type: string
+    description: Indicator of whether the picked UPC is sold by weight. E is the observed value for an each/fixed-unit item.
+    synonyms:
+      - picked sell by weight indicator
+    searchable: true
+    filterable: true
+    return_by_default: true
+    pii: false
+    exact_match: true
+    examples:
+      - E
+  orderLine.pickedItems.pickedItemUpcPk:
+    type: string
+    description: Internal lookup/primary-key value for the picked UPC record. Technical reference id, not a UPC itself.
+    synonyms:
+      - picked item upc pk
+      - upc lookup key
+    searchable: true
+    filterable: true
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - "535859135"
+  orderLine.pickedItems.pickedTime:
+    type: datetime
+    description: Timestamp (UTC) when this specific UPC was picked. Use for "when was this item picked" questions.
+    synonyms:
+      - picked time
+      - pick timestamp
+      - when was it picked
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "2024-09-19T23:30:07.531Z"
+
+  # Record-level timestamps.
+  createdDate:
+    type: datetime
+    description: Timestamp (UTC) when this completed order line record was created.
+    synonyms:
+      - created date
+      - created on
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "2024-10-28T09:56:48.900Z"
+  modifiedDate:
+    type: datetime
+    description: Timestamp (UTC) when this completed order line record was last modified.
+    synonyms:
+      - modified date
+      - last updated
+    searchable: true
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - "2024-10-28T09:56:48.901Z"
+
+  # Technical persistence metadata.
+  _class:
+    type: string
+    description: Java class used by Spring Data to persist the document. Technical metadata only - not useful for business questions and should not be returned unless explicitly requested.
+    synonyms:
+      - class
+      - java class
+      - document class
+      - _class
+    searchable: false
+    filterable: true
+    sortable: false
+    return_by_default: false
+    pii: false
+    exact_match: true
+    examples:
+      - com.albertsons.ecommerce.aps.pojo.RealTimeUpdateEventModel
+
+sample_queries:
+  - user_request: show completed order lines for order 96056717
+    target:
+      database: orderff
+      collection: completed_orderline
+      filter:
+        orderNumber: "96056717"
+  - user_request: show completed order lines for fulfillment order 96056717011
+    target:
+      database: orderff
+      collection: completed_orderline
+      filter:
+        fulfillmentOrderNumber: "96056717011"
+  - user_request: who picked order 96056717
+    target:
+      database: orderff
+      collection: completed_orderline
+      filter:
+        orderNumber: "96056717"
+      fields:
+        - orderNumber
+        - userId
+        - reasonCode
+  - user_request: show fully picked order lines for store 0177
+    target:
+      database: orderff
+      collection: completed_orderline
+      filter:
+        storeNumber: "0177"
+        orderLine.pickingType: FULLY_PICKED
+  - user_request: show completed order lines picked by vbhar03
+    target:
+      database: orderff
+      collection: completed_orderline
+      filter:
+        userId: vbhar03
+  - user_request: when was item 136010013 picked on order 96056717
+    target:
+      database: orderff
+      collection: completed_orderline
+      filter:
+        orderNumber: "96056717"
+        orderLine.orderedItemId: "136010013"
+      fields:
+        - orderNumber
+        - orderLine.orderedItemId
+        - orderLine.pickedItems.pickedTime
+  - user_request: show prepick reason code order lines
+    target:
+      database: orderff
+      collection: completed_orderline
+      filter:
+        reasonCode:
+          $regex: ^PREPICK
+          $options: i
+
+# Sample completed_orderline document (reference used to build this schema - kept for context):
+# {
+#   "_id": "96056717011-136010013",
+#   "orderNumber": "96056717",
+#   "fulfillmentOrderNumber": "96056717011",
+#   "storeNumber": "0177",
+#   "uuid": "uniqueID - Source to fill.",
+#   "userId": "vbhar03",
+#   "reasonCode": "PREPICK/REGULAR",
+#   "orderLine": [
+#     {
+#       "orderedItemId": "136010013",
+#       "orderedUpcId": "021130070107",
+#       "orderedItemDescription": "Lucerne Milk - Half Gallon (container may vary)",
+#       "orderedQuantity": 1,
+#       "orderedItemTotalPrice": 2.39,
+#       "fulfilledQty": 1,
+#       "pickingType": "FULLY_PICKED",
+#       "unitOfMeasure": "EA",
+#       "orderedSellByWeightIndicator": "E",
+#       "pickedItems": [
+#         {
+#           "pickedItemUpc": "021130070107",
+#           "upcQty": 1,
+#           "sellByWeightIndicator": "E",
+#           "pickedItemUpcPk": "535859135",
+#           "pickedTime": { "$date": "2024-09-19T23:30:07.531Z" }
+#         }
+#       ]
+#     }
+#   ],
+#   "createdDate": { "$date": "2024-10-28T09:56:48.900Z" },
+#   "modifiedDate": { "$date": "2024-10-28T09:56:48.901Z" },
+#   "_class": "com.albertsons.ecommerce.aps.pojo.RealTimeUpdateEventModel"
+# }

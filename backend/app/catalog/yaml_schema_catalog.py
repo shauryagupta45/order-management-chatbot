@@ -12,6 +12,7 @@ from backend.app.domain.errors import CatalogError, UnknownCollectionError, Unkn
 from backend.app.domain.schema_models import CollectionSchema, DatabaseCatalog, DatabaseDefinition
 
 
+
 class YamlSchemaCatalog(SchemaCatalog):
     def __init__(self, resource_dir: str | Path) -> None:
         self.resource_dir = Path(resource_dir)

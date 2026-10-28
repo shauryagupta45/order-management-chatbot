@@ -20,9 +20,9 @@ def register_query_tools(mcp, dependencies: AppDependencies) -> None:
         projection: dict[str, int | bool] | None = None,
         sort: dict[str, int | str] | None = None,
         limit: int = 10,
-        sanitize: bool = False,
+        sanitize: bool = True,
     ) -> dict:
-        """Use this for read-only MongoDB find queries after resolving schema context. By default returns unsanitized raw documents; set sanitize=true to strip PII/sensitive fields."""
+        """Use this for read-only MongoDB find queries after resolving schema context. By default PII/sensitive fields are stripped; pass sanitize=false only when raw documents are explicitly required."""
         started_at = perf_counter()
         schema = dependencies.query_validator.get_schema(database, collection)
         capped_limit = dependencies.query_validator.cap_limit(limit, schema.default_limit)
@@ -64,9 +64,9 @@ def register_query_tools(mcp, dependencies: AppDependencies) -> None:
 
     @mcp.tool()
     def aggregate_documents(
-        database: str, collection: str, pipeline: list[dict[str, Any]], limit: int = 10, sanitize: bool = False
+        database: str, collection: str, pipeline: list[dict[str, Any]], limit: int = 10, sanitize: bool = True
     ) -> dict:
-        """Use this for read-only aggregation when find/count cannot answer the question. By default returns unsanitized raw documents; set sanitize=true to strip PII/sensitive fields."""
+        """Use this for read-only aggregation when find/count cannot answer the question. By default PII/sensitive fields are stripped; pass sanitize=false only when raw documents are explicitly required."""
         started_at = perf_counter()
         schema = dependencies.query_validator.get_schema(database, collection)
         capped_limit = dependencies.query_validator.cap_limit(limit, schema.default_limit)

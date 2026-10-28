@@ -55,11 +55,44 @@ If you use `uv`:
 }
 ```
 
+## Data Access (API vs direct MongoDB)
+
+By default the server does not connect to MongoDB. Queries are built and validated locally (schema, filters, projection policy, sanitizer), then sent to a data API, and the API's response is sanitized and returned to the LLM. The API layer is [backend/app/db/api_repository.py](backend/app/db/api_repository.py).
+
+| Setting | Purpose |
+|---|---|
+| `DATA_ACCESS_MODE` | `api` (default) or `mongodb` (direct connection, needs `MONGODB_URI`) |
+| `API_BASE_URL` | Data API base URL (required in `api` mode) |
+| `API_TOKEN` | Optional bearer token |
+| `API_USERNAME` / `API_PASSWORD` | Optional Basic auth |
+| `API_TIMEOUT_SECONDS` | Request timeout, default 60 |
+
+Contract the API must implement (bodies are MongoDB Extended JSON, the API must execute read-only):
+
+- `POST /find` `{database, collection, filter, projection, sort, limit}` returns `{"documents": [...]}`
+- `POST /count` `{database, collection, filter}` returns `{"count": n}`
+- `POST /aggregate` `{database, collection, pipeline, limit}` returns `{"documents": [...]}`
+- `POST /explain` `{database, collection, filter}` returns `{"explain": {...}}`
+- `GET /health` returns any 2xx
+
+### Running the data API
+
+The data API is a FastAPI service ([backend/data_api/](backend/data_api/)) and the only process that holds MongoDB credentials. It re-validates every query against the schema catalog, is read-only (no write endpoints), and requires authentication; it refuses to start without credentials.
+
+```bash
+pip install -e ".[data-api]"
+export MONGODB_URI=...                 # held by this service only
+export DATA_API_USERNAME=... DATA_API_PASSWORD=...   # Basic auth, and/or DATA_API_TOKEN=... for bearer
+uvicorn backend.data_api.main:create_app --factory --port 8080
+```
+
+Then point the MCP server at it with `API_BASE_URL=http://<host>:8080` (plus matching `API_USERNAME`/`API_PASSWORD` or `API_TOKEN`). Interactive docs are served at `/docs`. The data API returns documents unsanitized; PII/sensitive stripping still happens in the MCP server's response sanitizer.
+
 ## How MCP Works Here
 
 The client should first call `search_schema_context` or `resolve_query_target` for natural-language requests. After the target is clear, call `find_documents`, `count_documents`, or `aggregate_documents`. Do not guess database or collection names when schema context is available.
 
-`find_documents` and `aggregate_documents` return unsanitized raw documents by default for developer workflows. Pass `sanitize: true` only when you explicitly want PII/sensitive fields stripped. Query-style tools include `elapsed_ms` in their response so you can see how long the server spent executing the request.
+`find_documents` and `aggregate_documents` strip PII/sensitive fields by default (`sanitize: true`). Pass `sanitize: false` only when you explicitly need raw documents. Query-style tools include `elapsed_ms` in their response so you can see how long the server spent executing the request.
 
 Current curated databases are `osco` and `orderff`. Their collection schema files are starter schemas created from known collection names, so `_id` is the only queryable field until you add real field metadata.
 
@@ -83,7 +116,7 @@ To make natural-language queries useful, add actual collection fields and mark o
 
 The server is read-only by default and exposes no insert, update, delete, or drop tools. It validates configured database names, collection names, filter fields, projection fields, sort fields, and aggregation stages against the resource catalog.
 
-Blocked operators and stages include `$where`, `$function`, `$accumulator`, `$out`, and `$merge`. PII and sensitive fields are returned by default for developer use, but can be stripped by passing `sanitize: true` to supported query tools.
+Blocked operators and stages include `$where`, `$function`, `$accumulator`, `$out`, and `$merge`. PII and sensitive fields are stripped by default; passing `sanitize: false` to supported query tools returns them raw.
 
 Query limits are capped by `MCP_MAX_DOCUMENTS_PER_QUERY`, and oversized responses are truncated according to `MCP_MAX_BYTES_PER_RESPONSE`.
 

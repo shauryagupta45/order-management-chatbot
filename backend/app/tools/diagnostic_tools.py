@@ -16,10 +16,10 @@ def register_diagnostic_tools(mcp, dependencies: AppDependencies) -> None:
 
     @mcp.tool()
     def mongodb_ping() -> dict:
-        """Use this to verify MongoDB connectivity without exposing the MongoDB connection string."""
+        """Use this to verify the data source (data API or MongoDB, per DATA_ACCESS_MODE) is reachable without exposing connection details."""
         try:
             dependencies.repository.ping()
             return {"ok": True}
         except Exception as exc:  # pragma: no cover - needs a live MongoDB failure
-            return {"ok": False, "error": f"MongoDB ping failed: {exc.__class__.__name__}"}
+            return {"ok": False, "error": f"Data source ping failed: {exc.__class__.__name__}"}
 
