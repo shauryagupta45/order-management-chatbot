@@ -104,3 +104,17 @@ def test_api_mode_requires_base_url_and_mongodb_mode_requires_uri() -> None:
     with pytest.raises(ValueError, match="MONGODB_URI"):
         Settings(_env_file=None, DATA_ACCESS_MODE="mongodb")
     assert Settings(_env_file=None, DATA_ACCESS_MODE="api", API_BASE_URL="https://x.invalid").data_access_mode == "api"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({"MONGODB_URI": "mongodb+srv://u:p@osco-prod-mongodb-01-pl-0.sk5vf.mongodb.net/"}, "prod"),
+        ({"MONGODB_URI": "mongodb+srv://u:p@osco-qa2-mongodb-01.sk5vf.mongodb.net/"}, "nonprod"),
+        ({"MONGODB_URI": "mongodb+srv://u:p@osco-nonprod-mongodb.sk5vf.mongodb.net/"}, "nonprod"),
+        ({"MONGODB_URI": "mongodb+srv://u:p@osco-qa2.sk5vf.mongodb.net/", "OSCO_ENVIRONMENT": "prod"}, "prod"),
+        ({"MONGODB_URI": None}, "unknown"),
+    ],
+)
+def test_environment_is_inferred_from_mongodb_host(overrides: dict, expected: str) -> None:
+    assert LocalTestSettings(**overrides).environment == expected

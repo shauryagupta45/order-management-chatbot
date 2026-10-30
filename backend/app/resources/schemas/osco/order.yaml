@@ -15,7 +15,11 @@ business_context:
     - show order lines
     - show delivery slot
   when_to_use: Use this collection for OSCO order-level records, including order status, store, fulfillment system, customer id, order totals, payment status, sub-orders, delivery details, tote details, exceptions, and item lines.
-  when_not_to_use: Do not use for order summary-only reporting if the user explicitly asks for orderSummary, or for historical changes if the user explicitly asks for orderHistory.
+  when_not_to_use: >-
+    Do not use for order summary-only reporting if the user explicitly asks for orderSummary. In prod this collection
+    keeps only the last 3 months of orders, so do not use it for dates older than 3 months such as "same date last
+    year", last year's holidays, or year-over-year comparisons - query osco.orderHistory only for those. For a range
+    that crosses the 3-month boundary, query both collections and count each orderNumber once.
 aliases:
   - order
   - customer order
@@ -366,7 +370,10 @@ fields:
       - CREATE
   orderCreatedDate:
     type: datetime
-    description: Business timestamp when the order was created. Prefer this over technical createdDate.
+    description: >-
+      Business timestamp when the order was created (BSON date, UTC). Prefer this over technical createdDate. Only
+      orders from the last 3 months (prod retention) are kept here; older orders are in osco.orderHistory, where this same
+      field is an ISO-8601 string instead of a date.
     synonyms:
       - order created date
       - created date

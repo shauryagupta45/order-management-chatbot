@@ -6,10 +6,11 @@ from backend.app.dependencies import AppDependencies
 def register_diagnostic_tools(mcp, dependencies: AppDependencies) -> None:
     @mcp.tool()
     def health_check() -> dict:
-        """Use this to verify that the MCP server process is alive and has loaded schema resources."""
+        """Use this to verify that the MCP server process is alive and has loaded schema resources, and to see which environment (prod/nonprod) the data comes from."""
         return {
             "ok": True,
             "server": dependencies.settings.mcp_server_name,
+            "environment": dependencies.settings.environment,
             "read_only": dependencies.settings.mcp_read_only,
             "configured_databases": [database.name for database in dependencies.catalog.list_databases()],
         }

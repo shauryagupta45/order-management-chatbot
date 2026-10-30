@@ -11,7 +11,7 @@ from backend.app.services.query_builder import QueryBuilder
 from backend.app.services.query_validator import QueryValidator
 from backend.app.services.response_sanitizer import ResponseSanitizer
 from backend.app.services.target_resolver import TargetResolver
-from backend.app.tools.query_tools import register_query_tools
+from backend.app.tools.query_tools import PROD_EMPTY_ARCHIVE_WARNING, register_query_tools
 
 
 class FakeMcp:
@@ -119,3 +119,100 @@ def test_find_documents_tool_sanitizes_by_default() -> None:
     ]
     assert result["sanitized"] is True
     assert repository.last_projection["_id"] == 1
+
+
+class EmptyRepository(FakeRepository):
+    def count(self, database, collection, filter):
+        return 0
+
+    def aggregate(self, database, collection, pipeline, limit):
+        return []
+
+
+def _dependencies_for_host(repository: FakeRepository, host: str) -> AppDependencies:
+    dependencies = build_test_dependencies(repository)
+    settings = LocalTestSettings(
+        MCP_SCHEMA_RESOURCE_DIR=Path("backend/app/resources"), MONGODB_URI=f"mongodb+srv://reader:secret@{host}/"
+    )
+    return AppDependencies(**{**dependencies.__dict__, "settings": settings})
+
+
+def _prod_dependencies(repository: FakeRepository) -> AppDependencies:
+    return _dependencies_for_host(repository, "osco-prod-mongodb-01-pl-0.example.mongodb.net")
+
+
+def test_empty_order_history_in_prod_is_not_reported_as_missing_data() -> None:
+    mcp = FakeMcp()
+    register_query_tools(mcp, _prod_dependencies(EmptyRepository()))
+
+    count = mcp.tools["count_documents"](database="osco", collection="orderHistory", filter={})
+    aggregate = mcp.tools["aggregate_documents"](database="osco", collection="orderHistory", pipeline=[{"$match": {}}])
+
+    assert count["environment"] == "prod"
+    assert count["warnings"] == [PROD_EMPTY_ARCHIVE_WARNING]
+    assert aggregate["warnings"] == [PROD_EMPTY_ARCHIVE_WARNING]
+
+
+def test_no_prod_warning_outside_prod_or_for_other_collections() -> None:
+    nonprod = FakeMcp()
+    register_query_tools(nonprod, _dependencies_for_host(EmptyRepository(), "osco-qa2-mongodb-01.example.mongodb.net"))
+    prod = FakeMcp()
+    register_query_tools(prod, _prod_dependencies(EmptyRepository()))
+
+    nonprod_count = nonprod.tools["count_documents"](database="osco", collection="orderHistory", filter={})
+    assert nonprod_count["environment"] == "nonprod"
+    assert nonprod_count["warnings"] == []
+    assert prod.tools["count_documents"](database="osco", collection="order", filter={})["warnings"] == []
+
+
+class RecordingRepository(FakeRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self.last_filter = None
+        self.last_pipeline = None
+
+    def count(self, database, collection, filter):
+        self.last_filter = filter
+        return 1
+
+    def aggregate(self, database, collection, pipeline, limit):
+        self.last_pipeline = pipeline
+        return [{"orders": 1}]
+
+
+def test_order_counts_only_active_version_by_default() -> None:
+    repository = RecordingRepository()
+    mcp = FakeMcp()
+    register_query_tools(mcp, build_test_dependencies(repository))
+
+    count = mcp.tools["count_documents"](database="osco", collection="orderHistory", filter={"banner": "safeway"})
+    assert count["active_only_applied"] is True
+    assert repository.last_filter == {"$and": [{"banner": "safeway"}, {"isActive": True}]}
+
+    mcp.tools["count_documents"](database="osco", collection="order", filter={})
+    assert repository.last_filter == {"isActive": True}
+
+    aggregate = mcp.tools["aggregate_documents"](
+        database="osco", collection="orderHistory", pipeline=[{"$group": {"_id": "$orderNumber"}}, {"$count": "orders"}]
+    )
+    assert aggregate["active_only_applied"] is True
+    assert repository.last_pipeline[0] == {"$match": {"isActive": True}}
+
+
+def test_active_only_can_be_disabled_or_overridden() -> None:
+    repository = RecordingRepository()
+    mcp = FakeMcp()
+    register_query_tools(mcp, build_test_dependencies(repository))
+
+    every_version = mcp.tools["count_documents"](database="osco", collection="orderHistory", filter={}, active_only=False)
+    assert every_version["active_only_applied"] is False
+    assert repository.last_filter == {}
+
+    # An explicit isActive condition is left as the caller wrote it.
+    mcp.tools["count_documents"](database="osco", collection="order", filter={"isActive": False})
+    assert repository.last_filter == {"isActive": False}
+
+    pipeline = [{"$match": {"banner": "safeway"}}]
+    other = mcp.tools["aggregate_documents"](database="osco", collection="store", pipeline=pipeline)
+    assert other["active_only_applied"] is False
+    assert repository.last_pipeline == pipeline

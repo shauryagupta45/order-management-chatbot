@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import logging
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 class SecretRedactionFilter(logging.Filter):
@@ -15,10 +19,12 @@ class SecretRedactionFilter(logging.Filter):
 def configure_logging(level: str = "INFO") -> None:
     handler = logging.StreamHandler(sys.stderr)
     handler.addFilter(SecretRedactionFilter())
+    formatter = logging.Formatter("%(asctime)s IST %(levelname)s %(name)s %(message)s")
+    formatter.converter = lambda *_: datetime.now(IST).timetuple()  # log timestamps are always IST
+    handler.setFormatter(formatter)
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
         handlers=[handler],
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
         force=True,
     )
 

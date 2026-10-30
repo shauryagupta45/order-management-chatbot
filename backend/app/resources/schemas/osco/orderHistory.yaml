@@ -1,28 +1,150 @@
 database: osco
 collection: orderHistory
 display_name: Order History
-description: Starter schema for the osco.orderHistory collection.
+description: >-
+  Archive of OSCO orders. In prod, osco.order keeps only the last 3 months of orders; older orders are purged from
+  it and live on in osco.orderHistory, which goes back to at least December 2023. Use this collection (and not
+  osco.order) for any order question about dates older than 3 months - for example
+  "same date last year", last year's holiday trend, or year-over-year comparisons. Documents use the same
+  OrderModel as osco.order, so field names are the same (orderNumber, orderCreatedDate, banner, storeNumber,
+  orderStatus, subOrders.fulfillmentType, orderTotal.amount, ...) and orderCreatedDate is a BSON date (UTC), so the
+  same date filters work. One order can have several history documents (snapshots identified by versionNumber);
+  exactly one has isActive=true, which the count/aggregate tools apply automatically. The collection is large:
+  full-day aggregations can time out, so use count_documents for totals and split breakdowns into a few hours each.
 business_context:
   primary_entity: order history
   common_user_phrases:
     - order history
     - orderHistory
-  when_to_use: Use for questions specifically about OSCO order history records.
+    - archived orders
+    - old orders
+    - purged orders
+    - last year orders
+    - same date last year
+    - same day last year
+    - year over year
+    - year over year order count
+    - compare with last year
+    - order count last year
+    - previous year
+    - historical orders
+    - orders older than 3 months
+    - orders older than 90 days
+  when_to_use: >-
+    Use for orders created more than 3 months ago (the prod retention window of osco.order): last-year and
+    year-over-year comparisons, historical trends, and lookups of old order numbers that are no longer in osco.order.
+    For a date range that crosses the 3-month boundary, query osco.order for the recent part and osco.orderHistory
+    for the older part, then combine, counting each orderNumber once.
+  when_not_to_use: >-
+    Do not use for orders from the last 3 months (today, yesterday, last week, last month) - use osco.order, which has the full,
+    current order (order lines, substitutions, totes, refunds). History snapshots can be early versions with empty
+    order lines, so item-level questions about old orders may return incomplete data; say so when that happens.
 aliases:
   - order history
   - orderHistory
+  - archived orders
+  - historical orders
+  - old orders
 identity:
   primary_key: _id
+  business_keys:
+    - orderNumber
+    - versionNumber
 default_limit: 10
+# Same document model as osco.order: inherit all of its field metadata, then override what differs below.
+inherit_fields_from: schemas/osco/order.yaml
 fields:
-  _id:
-    type: objectId
-    description: MongoDB internal document id.
+  orderCreatedDate:
+    type: datetime
+    description: >-
+      When the order was created - a BSON date in UTC, filtered exactly like osco.order, e.g.
+      {"orderCreatedDate": {"$gte": {"$date": "2025-10-28T07:00:00Z"}, "$lt": {"$date": "2025-10-29T07:00:00Z"}}}
+      for 2025-10-28 in America/Los_Angeles (PDT, UTC-7). Only some very old records (late 2023) hold an ISO-8601
+      string instead (e.g. "2023-12-08T03:30:05.867000"); for those dates, if the date filter matches nothing, retry
+      with string bounds such as {"$gte": "2023-12-08T08:00:00", "$lt": "2023-12-09T08:00:00"}.
     synonyms:
-      - mongo id
-      - document id
+      - order created date
+      - created date
+      - order date
+      - purchase date
+      - history order date
     searchable: true
     filterable: true
+    sortable: true
     return_by_default: true
     pii: false
-
+    examples:
+      - "2025-10-28T07:00:00Z"
+  orderEditCutoffDate:
+    type: string
+    description: Latest time the order could be edited, ISO-8601 string (no timezone suffix).
+    synonyms:
+      - edit cutoff
+    filterable: true
+    return_by_default: false
+    pii: false
+  orderCancelCutoffDate:
+    type: string
+    description: Latest time the order could be cancelled, ISO-8601 string (no timezone suffix).
+    synonyms:
+      - cancel cutoff
+    filterable: true
+    return_by_default: false
+    pii: false
+  audit.createDate:
+    type: string
+    description: When this history snapshot was written, ISO-8601 string in UTC (usually equal to orderCreatedDate for version 1).
+    synonyms:
+      - snapshot created
+      - history record created
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  versionNumber:
+    type: number
+    description: >-
+      Snapshot version of the order. One orderNumber can have several history documents (1 = as created, higher =
+      later updates). Count orders with distinct orderNumber; for an order's latest state, sort by versionNumber
+      descending and keep the first document per orderNumber.
+    synonyms:
+      - version number
+      - snapshot version
+      - order version
+    filterable: true
+    sortable: true
+    return_by_default: true
+    pii: false
+    examples:
+      - 1
+  version:
+    type: number
+    description: Technical optimistic-locking version of the document. Prefer versionNumber for business questions.
+    filterable: true
+    return_by_default: false
+    pii: false
+  ttl:
+    type: number
+    description: Time-to-live setting carried on the document (archive expiry metadata).
+    filterable: true
+    return_by_default: false
+    pii: false
+  _class:
+    type: string
+    description: Java model class of the document (com.albertsons.ecommerce.osco.model.OrderModel).
+    filterable: true
+    return_by_default: false
+    pii: false
+sample_queries:
+  - user_request: how many orders were placed on the same date last year
+    target:
+      database: osco
+      collection: orderHistory
+      filter:
+        orderCreatedDate:
+          $gte: "2025-10-28T05:00:00"
+          $lt: "2025-10-29T05:00:00"
+  - user_request: last year orders by banner
+    target:
+      database: osco
+      collection: orderHistory

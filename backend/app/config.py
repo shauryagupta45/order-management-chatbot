@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -28,6 +30,17 @@ class Settings(BaseSettings):
     mcp_allow_aggregate: bool = Field(default=True, alias="MCP_ALLOW_AGGREGATE")
     mcp_allow_write_tools: bool = Field(default=False, alias="MCP_ALLOW_WRITE_TOOLS")
     mcp_allow_pii_projection: bool = Field(default=False, alias="MCP_ALLOW_PII_PROJECTION")
+    # "prod" or "nonprod". Leave unset to infer it from the MONGODB_URI host (e.g. "osco-prod-mongodb-01...").
+    osco_environment: Literal["prod", "nonprod"] | None = Field(default=None, alias="OSCO_ENVIRONMENT")
+
+    @property
+    def environment(self) -> Literal["prod", "nonprod", "unknown"]:
+        if self.osco_environment:
+            return self.osco_environment
+        if not self.mongodb_uri:
+            return "unknown"
+        host = urlsplit(self.mongodb_uri).hostname or ""
+        return "prod" if re.search(r"(^|[-.])prod([-.]|$)", host) else "nonprod"
 
     @model_validator(mode="after")
     def validate_runtime_settings(self) -> "Settings":
