@@ -2,15 +2,18 @@ database: osco
 collection: orderHistory
 display_name: Order History
 description: >-
-  Archive of OSCO orders. In prod, osco.order keeps only the last 3 months of orders; older orders are purged from
-  it and live on in osco.orderHistory, which goes back to at least December 2023. Use this collection (and not
-  osco.order) for any order question about dates older than 3 months - for example
-  "same date last year", last year's holiday trend, or year-over-year comparisons. Documents use the same
-  OrderModel as osco.order, so field names are the same (orderNumber, orderCreatedDate, banner, storeNumber,
-  orderStatus, subOrders.fulfillmentType, orderTotal.amount, ...) and orderCreatedDate is a BSON date (UTC), so the
-  same date filters work. One order can have several history documents (snapshots identified by versionNumber);
-  exactly one has isActive=true, which the count/aggregate tools apply automatically. The collection is large:
-  full-day aggregations can time out, so use count_documents for totals and split breakdowns into a few hours each.
+  Archive of OSCO orders (prod only). Orders are moved here from osco.order in batches, so this collection holds
+  everything created before a handoff point (its newest orderCreatedDate; about 6 months back as of 2026-10-30) and
+  osco.order holds everything after. Records go back to 2019. Use this collection (and not osco.order) for dates
+  before the handoff - "same date last year", last year's holiday trend, year-over-year comparisons. A range that
+  crosses the handoff (e.g. "last 6 months") needs both collections: use the count_orders tool, which finds the
+  handoff, splits the range and adds the parts. In nonprod this collection is not queried; the tools return 0 / no documents for it. Documents
+  use the same OrderModel as osco.order, so field names are the same (orderNumber, orderCreatedDate, banner,
+  storeNumber, orderStatus, subOrders.fulfillmentType, orderTotal.amount, ...). Date fields hold a BSON date in some
+  documents and an ISO string in others; the tools match both. One order can have several history documents
+  (snapshots identified by versionNumber); exactly one has isActive=true, which the count/aggregate tools apply
+  automatically. The collection is large: full-day aggregations can time out, so use count_documents/count_orders
+  for totals and split breakdowns into a few hours each.
 business_context:
   primary_entity: order history
   common_user_phrases:
@@ -28,15 +31,15 @@ business_context:
     - order count last year
     - previous year
     - historical orders
-    - orders older than 3 months
-    - orders older than 90 days
+    - orders older than 6 months
+    - archived before handoff
   when_to_use: >-
-    Use for orders created more than 3 months ago (the prod retention window of osco.order): last-year and
+    Prod only. Use for orders created before the handoff (the newest orderCreatedDate in this collection): last-year and
     year-over-year comparisons, historical trends, and lookups of old order numbers that are no longer in osco.order.
-    For a date range that crosses the 3-month boundary, query osco.order for the recent part and osco.orderHistory
+    For a date range that crosses the handoff, query osco.order for the recent part and osco.orderHistory
     for the older part, then combine, counting each orderNumber once.
   when_not_to_use: >-
-    Do not use for orders from the last 3 months (today, yesterday, last week, last month) - use osco.order, which has the full,
+    Do not use for orders after the handoff (today, yesterday, recent months) - use osco.order, which has the full,
     current order (order lines, substitutions, totes, refunds). History snapshots can be early versions with empty
     order lines, so item-level questions about old orders may return incomplete data; say so when that happens.
 aliases:
@@ -56,12 +59,10 @@ inherit_fields_from: schemas/osco/order.yaml
 fields:
   orderCreatedDate:
     type: datetime
+    mixed_date_string: true
     description: >-
-      When the order was created - a BSON date in UTC, filtered exactly like osco.order, e.g.
-      {"orderCreatedDate": {"$gte": {"$date": "2025-10-28T07:00:00Z"}, "$lt": {"$date": "2025-10-29T07:00:00Z"}}}
-      for 2025-10-28 in America/Los_Angeles (PDT, UTC-7). Only some very old records (late 2023) hold an ISO-8601
-      string instead (e.g. "2023-12-08T03:30:05.867000"); for those dates, if the date filter matches nothing, retry
-      with string bounds such as {"$gte": "2023-12-08T08:00:00", "$lt": "2023-12-09T08:00:00"}.
+      When the order was created (UTC). Stored as a BSON date in some documents and an ISO-8601 string (e.g. "2025-07-03T06:39:58.331Z") in others; the query tools rewrite date filters on this field to match both, so filter with {"$date": "...Z"} bounds as usual. For order counts over a date range use the count_orders tool, which
+      splits the range between osco.order and osco.orderHistory.
     synonyms:
       - order created date
       - created date
@@ -75,22 +76,8 @@ fields:
     pii: false
     examples:
       - "2025-10-28T07:00:00Z"
-  orderEditCutoffDate:
-    type: string
-    description: Latest time the order could be edited, ISO-8601 string (no timezone suffix).
-    synonyms:
-      - edit cutoff
-    filterable: true
-    return_by_default: false
-    pii: false
-  orderCancelCutoffDate:
-    type: string
-    description: Latest time the order could be cancelled, ISO-8601 string (no timezone suffix).
-    synonyms:
-      - cancel cutoff
-    filterable: true
-    return_by_default: false
-    pii: false
+      - "2025-07-03T06:39:58.331Z"
+  # orderEditCutoffDate / orderCancelCutoffDate / createdDate / modifiedDate are inherited from order.yaml (mixed date/string).
   audit.createDate:
     type: string
     description: When this history snapshot was written, ISO-8601 string in UTC (usually equal to orderCreatedDate for version 1).
@@ -105,8 +92,8 @@ fields:
     type: number
     description: >-
       Snapshot version of the order. One orderNumber can have several history documents (1 = as created, higher =
-      later updates). Count orders with distinct orderNumber; for an order's latest state, sort by versionNumber
-      descending and keep the first document per orderNumber.
+      later updates). Exactly one version per orderNumber has isActive=true; the count/aggregate tools filter on it by
+      default, so do not group by orderNumber just to de-duplicate (slow, can time out).
     synonyms:
       - version number
       - snapshot version
@@ -142,8 +129,10 @@ sample_queries:
       collection: orderHistory
       filter:
         orderCreatedDate:
-          $gte: "2025-10-28T05:00:00"
-          $lt: "2025-10-29T05:00:00"
+          $gte:
+            $date: "2025-10-28T05:00:00Z"
+          $lt:
+            $date: "2025-10-29T05:00:00Z"
   - user_request: last year orders by banner
     target:
       database: osco

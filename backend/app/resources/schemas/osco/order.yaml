@@ -16,10 +16,11 @@ business_context:
     - show delivery slot
   when_to_use: Use this collection for OSCO order-level records, including order status, store, fulfillment system, customer id, order totals, payment status, sub-orders, delivery details, tote details, exceptions, and item lines.
   when_not_to_use: >-
-    Do not use for order summary-only reporting if the user explicitly asks for orderSummary. In prod this collection
-    keeps only the last 3 months of orders, so do not use it for dates older than 3 months such as "same date last
-    year", last year's holidays, or year-over-year comparisons - query osco.orderHistory only for those. For a range
-    that crosses the 3-month boundary, query both collections and count each orderNumber once.
+    Do not use for order summary-only reporting if the user explicitly asks for orderSummary. In prod, orders are
+    moved from this collection to osco.orderHistory in batches (about 6 months kept as of 2026-10-30), so do not use
+    it for dates before the handoff (the newest orderCreatedDate in osco.orderHistory) such as "same date last year",
+    last year's holidays, or year-over-year comparisons - query osco.orderHistory only for those. For a range that
+    crosses the handoff, use count_orders, which splits the range between both collections.
 aliases:
   - order
   - customer order
@@ -52,7 +53,8 @@ fields:
 
   # Intentionally ignored infrastructure fields:
   # - version: audit/storage version, not the business order version. Prefer versionNumber.
-  # - createdBy, createdDate, modifiedBy, modifiedDate: technical audit fields. Prefer orderCreatedDate for order creation.
+  # - createdBy, modifiedBy: technical audit fields. createdDate/modifiedDate are declared below for date filters only;
+  #   prefer orderCreatedDate for order creation.
   # - ttl: retention/storage control, not useful for order questions.
 
   # Primary business identifiers. Prefer orderNumber when the user says order id/order number.
@@ -370,10 +372,11 @@ fields:
       - CREATE
   orderCreatedDate:
     type: datetime
+    mixed_date_string: true
     description: >-
-      Business timestamp when the order was created (BSON date, UTC). Prefer this over technical createdDate. Only
-      orders from the last 3 months (prod retention) are kept here; older orders are in osco.orderHistory, where this same
-      field is an ISO-8601 string instead of a date.
+      Business timestamp when the order was created (UTC). Prefer this over technical createdDate. Stored as a BSON date in some documents and an ISO-8601 string (e.g. "2025-07-03T06:39:58.331Z") in others; the query tools rewrite date filters on this field to match both, so filter with {"$date": "...Z"} bounds as usual. Only
+      orders after the handoff (about the last 6 months in prod) are kept here; older orders are in osco.orderHistory. For order
+      counts over a date range use the count_orders tool, which picks the collection(s) for you.
     synonyms:
       - order created date
       - created date
@@ -386,7 +389,9 @@ fields:
     pii: false
   orderCancelCutoffDate:
     type: datetime
-    description: Latest timestamp by which the customer/order can be cancelled.
+    mixed_date_string: true
+    description: >-
+      Latest timestamp by which the customer/order can be cancelled. Stored as a BSON date in some documents and an ISO-8601 string (e.g. "2025-07-03T06:39:58.331Z") in others; the query tools rewrite date filters on this field to match both, so filter with {"$date": "...Z"} bounds as usual.
     synonyms:
       - cancel cutoff
       - cancellation cutoff
@@ -398,7 +403,9 @@ fields:
     pii: false
   orderEditCutoffDate:
     type: datetime
-    description: Latest timestamp by which the customer/order can be edited.
+    mixed_date_string: true
+    description: >-
+      Latest timestamp by which the customer/order can be edited. Stored as a BSON date in some documents and an ISO-8601 string (e.g. "2025-07-03T06:39:58.331Z") in others; the query tools rewrite date filters on this field to match both, so filter with {"$date": "...Z"} bounds as usual.
     synonyms:
       - edit cutoff
       - order edit cutoff
@@ -2287,6 +2294,32 @@ fields:
     pii: false
 
   # Audit, external order, and receipt fields. Use auditLog event names for lifecycle timing questions.
+  createdDate:
+    type: datetime
+    mixed_date_string: true
+    description: >-
+      Technical timestamp when this document was written. Prefer orderCreatedDate for order creation questions.
+      Stored as a BSON date in some documents and an ISO-8601 string (e.g. "2025-07-03T06:39:58.331Z") in others; the query tools rewrite date filters on this field to match both, so filter with {"$date": "...Z"} bounds as usual.
+    synonyms:
+      - document created date
+      - record created date
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
+  modifiedDate:
+    type: datetime
+    mixed_date_string: true
+    description: >-
+      Technical timestamp when this document was last modified. Stored as a BSON date in some documents and an ISO-8601 string (e.g. "2025-07-03T06:39:58.331Z") in others; the query tools rewrite date filters on this field to match both, so filter with {"$date": "...Z"} bounds as usual.
+    synonyms:
+      - modified date
+      - last modified
+      - last updated
+    filterable: true
+    sortable: true
+    return_by_default: false
+    pii: false
   audit.createDate:
     type: datetime
     description: Audit create timestamp. Prefer orderCreatedDate for business order creation questions.

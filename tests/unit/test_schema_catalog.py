@@ -61,7 +61,9 @@ def test_order_history_inherits_order_fields() -> None:
     assert history.fields["subOrders.fulfillmentType"] == order.fields["subOrders.fulfillmentType"]
     # Overridden locally: history-specific descriptions and version fields.
     assert history.fields["orderCreatedDate"].type == "datetime"
-    assert "late 2023" in history.fields["orderCreatedDate"].description
+    for field in ("orderCreatedDate", "orderEditCutoffDate", "orderCancelCutoffDate", "createdDate", "modifiedDate"):
+        assert history.fields[field].mixed_date_string is True
+        assert order.fields[field].mixed_date_string is True
     assert history.fields["versionNumber"].sortable is True
 
 
