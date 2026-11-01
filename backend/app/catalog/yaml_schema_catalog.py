@@ -70,6 +70,14 @@ class YamlSchemaCatalog(SchemaCatalog):
 
     def _load_schema(self, path: Path) -> CollectionSchema:
         data = self._read_yaml(path)
+        parent = data.pop("inherit_fields_from", None)
+        if parent:
+            # Collections that store the same document model (e.g. osco.orderHistory archives osco.order) reuse the
+            # parent's field metadata; fields declared locally override or extend the inherited ones.
+            parent_data = self._read_yaml(self.resource_dir / parent)
+            if "inherit_fields_from" in parent_data:
+                raise CatalogError(f"Schema '{path}' inherits from '{parent}', which itself inherits; only one level is supported.")
+            data["fields"] = {**parent_data.get("fields", {}), **(data.get("fields") or {})}
         try:
             return CollectionSchema.model_validate(data)
         except PydanticValidationError as exc:

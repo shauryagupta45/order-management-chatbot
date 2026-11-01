@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -60,6 +61,15 @@ def _extended(value: Any) -> Any:
     return json_util.loads(json.dumps(value))
 
 
+def _short(value: Any, limit: int = 1500) -> str:
+    text = json_util.dumps(value)
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
+def _redact(text: str) -> str:
+    return re.sub(r"(mongodb(?:\+srv)?://)[^@/\s]+@", r"\1<redacted>@", text)
+
+
 def _json(payload: dict[str, Any]) -> Response:
     """Serialize with Extended JSON so ObjectId / dates / Decimal128 survive the round trip."""
     return Response(content=json_util.dumps(payload), media_type="application/json")
@@ -89,12 +99,14 @@ def create_app(settings: DataApiSettings | None = None, dependencies: AppDepende
     authenticated = [Depends(build_authenticator(resolved_settings))]
 
     @app.exception_handler(McpMongoError)
-    async def handle_bad_query(_: Request, exc: McpMongoError) -> JSONResponse:
+    async def handle_bad_query(request: Request, exc: McpMongoError) -> JSONResponse:
+        logger.warning("%s rejected: %s", request.url.path, exc)
         return JSONResponse(status_code=400, content={"status": "BAD_REQUEST", "message": str(exc)})
 
     @app.exception_handler(PyMongoError)
-    async def handle_database_error(_: Request, exc: PyMongoError) -> JSONResponse:
-        logger.error("Database request failed: %s", exc.__class__.__name__)
+    async def handle_database_error(request: Request, exc: PyMongoError) -> JSONResponse:
+        # The client only sees a generic 502; the real cause (timeout, auth, network...) goes to this log.
+        logger.error("%s database request failed: %s: %s", request.url.path, exc.__class__.__name__, _redact(str(exc))[:1500])
         return JSONResponse(
             status_code=502, content={"status": "BAD_GATEWAY", "message": "Database request failed"}
         )
@@ -120,7 +132,8 @@ def create_app(settings: DataApiSettings | None = None, dependencies: AppDepende
             sort=validator.validate_sort(schema, dict(request.sort) if request.sort else None),
             limit=limit,
         )
-        logger.info("find %s.%s returned %d", request.database, request.collection, len(documents))
+        logger.info("find %s.%s filter=%s limit=%d -> %d documents", request.database, request.collection,
+                    _short(filter_), limit, len(documents))
         return _json({"documents": documents})
 
     @app.post("/count", dependencies=authenticated)
@@ -129,6 +142,7 @@ def create_app(settings: DataApiSettings | None = None, dependencies: AppDepende
         filter_ = _extended(request.filter)
         validator.validate_filter(schema, filter_)
         total = repository.count(request.database, request.collection, validator.normalize_filter(schema, filter_))
+        logger.info("count %s.%s filter=%s -> %d", request.database, request.collection, _short(filter_), total)
         return _json({"count": total})
 
     @app.post("/aggregate", dependencies=authenticated)
@@ -138,7 +152,8 @@ def create_app(settings: DataApiSettings | None = None, dependencies: AppDepende
         pipeline = _extended(request.pipeline)
         validator.validate_pipeline(schema, pipeline)
         documents = repository.aggregate(request.database, request.collection, pipeline, limit)
-        logger.info("aggregate %s.%s returned %d", request.database, request.collection, len(documents))
+        logger.info("aggregate %s.%s pipeline=%s -> %d documents", request.database, request.collection,
+                    _short(pipeline), len(documents))
         return _json({"documents": documents})
 
     @app.post("/explain", dependencies=authenticated)
@@ -157,4 +172,7 @@ __all__ = ["create_app"]
 if __name__ == "__main__":
     import uvicorn
 
+    from backend.app.logging_config import configure_logging
+
+    configure_logging("INFO")  # without this, the per-query info lines are swallowed
     uvicorn.run(create_app(), host="127.0.0.1", port=8081)

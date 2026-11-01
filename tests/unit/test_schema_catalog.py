@@ -48,3 +48,32 @@ def test_invalid_collection_name() -> None:
 
     with pytest.raises(UnknownCollectionError, match="Unknown collection"):
         catalog.get_collection_schema("orderff", "missing")
+
+
+def test_order_history_inherits_order_fields() -> None:
+    catalog = YamlSchemaCatalog(RESOURCE_DIR)
+    order = catalog.get_collection_schema("osco", "order")
+    history = catalog.get_collection_schema("osco", "orderHistory")
+
+    # Inherited from order.yaml: same model, same field names.
+    assert set(order.fields) <= set(history.fields)
+    assert history.fields["banner"].filterable is True
+    assert history.fields["subOrders.fulfillmentType"] == order.fields["subOrders.fulfillmentType"]
+    # Overridden locally: history-specific descriptions and version fields.
+    assert history.fields["orderCreatedDate"].type == "datetime"
+    for field in ("orderCreatedDate", "orderEditCutoffDate", "orderCancelCutoffDate", "createdDate", "modifiedDate"):
+        assert history.fields[field].mixed_date_string is True
+        assert order.fields[field].mixed_date_string is True
+    assert history.fields["versionNumber"].sortable is True
+
+
+def test_nested_inheritance_is_rejected(tmp_path: Path) -> None:
+    resources = tmp_path / "resources"
+    shutil.copytree(RESOURCE_DIR, resources)
+    order_yaml = resources / "schemas/osco/order.yaml"
+    order_yaml.write_text(
+        "inherit_fields_from: schemas/osco/store.yaml\n" + order_yaml.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+
+    with pytest.raises(CatalogError, match="only one level"):
+        YamlSchemaCatalog(resources)

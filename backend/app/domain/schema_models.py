@@ -30,6 +30,8 @@ class FieldSchema(BaseModel):
     exact_match: bool = False
     indexed: bool = False
     allow_regex: bool = False
+    # Some documents store this date as a BSON date, others as an ISO-8601 string; date filters match both.
+    mixed_date_string: bool = False
     enum: list[Any] | None = None
     examples: list[Any] = Field(default_factory=list)
 
