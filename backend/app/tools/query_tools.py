@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import calendar
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
@@ -35,9 +36,19 @@ HISTORY_RETENTION_MONTHS = 24
 # Confirmed rule: dates a year old or older ("same day last year") always come from osco.orderHistory, so the split
 # point is never earlier than this, whatever the handoff lookup returns.
 HISTORY_ALWAYS_MONTHS = 12
-COUNT_ORDERS_CHUNK_DAYS = 31
-COUNT_ORDERS_MIN_CHUNK = timedelta(days=1)
-COUNT_ORDERS_PARALLELISM = 4
+# Without an {orderCreatedDate, isActive} index every order version in a window is fetched to check isActive, so a
+# busy full day times out while a 3-hour window answers in about a second. Ranges start as 3-hour windows; longer
+# ranges use bigger windows so the number of queries stays bounded.
+COUNT_ORDERS_WINDOW = timedelta(hours=3)
+COUNT_ORDERS_MAX_WINDOWS = 96
+# A window that fails is split in half and retried, down to this size.
+COUNT_ORDERS_MIN_WINDOW = timedelta(hours=1)
+# MongoDB stops a window query after this instead of running on after the client gives up. Kept just under the
+# 60 s client timeout: a day nobody has queried recently is read from disk and needs well over 20 s per window.
+COUNT_ORDERS_MAX_TIME_MS = 50_000
+# Count queries in flight against MongoDB at once, across all tool calls in this process.
+COUNT_ORDERS_PARALLELISM = 2
+_count_slots = threading.BoundedSemaphore(COUNT_ORDERS_PARALLELISM)
 
 
 # Collections that keep several versions of one order; exactly one version per orderNumber has isActive=true, so
@@ -118,13 +129,13 @@ def register_query_tools(mcp, dependencies: AppDependencies) -> None:
         projection: dict[str, int | bool] | None = None,
         sort: dict[str, int | str] | None = None,
         limit: int = 10,
-        sanitize: bool = True,
     ) -> dict:
-        """Use this for read-only MongoDB find queries after resolving schema context. By default PII/sensitive fields are stripped; pass sanitize=false only when raw documents are explicitly required."""
+        """Use this for read-only MongoDB find queries after resolving schema context. PII/sensitive fields are stripped unless the collection's schema disables sanitization."""
         with audited("find_documents", database=database, collection=collection, filter=filter,
-                     projection=projection, sort=sort, limit=limit, sanitize=sanitize) as audit:
+                     projection=projection, sort=sort, limit=limit) as audit:
             started_at = perf_counter()
             schema = dependencies.query_validator.get_schema(database, collection)
+            sanitize = schema.sanitize
             capped_limit = dependencies.query_validator.cap_limit(limit, schema.default_limit)
             dependencies.query_validator.validate_filter(schema, filter)
             normalized_filter = expand_mixed_date_filter(
@@ -190,20 +201,20 @@ def register_query_tools(mcp, dependencies: AppDependencies) -> None:
         collection: str,
         pipeline: list[dict[str, Any]],
         limit: int = 10,
-        sanitize: bool = True,
         active_only: bool = True,
     ) -> dict:
-        """Use this for read-only aggregation when find/count cannot answer the question. By default PII/sensitive fields are stripped; pass sanitize=false only when raw documents are explicitly required. For osco.order and osco.orderHistory, a leading {"$match": {"isActive": true}} is added by default so each order is counted once; pass active_only=false to aggregate over every version document (e.g. version history)."""
+        """Use this for read-only aggregation when find/count cannot answer the question. PII/sensitive fields are stripped unless the collection's schema disables sanitization. For osco.order and osco.orderHistory, a leading {"$match": {"isActive": true}} is added by default so each order is counted once; pass active_only=false to aggregate over every version document (e.g. version history)."""
         with audited("aggregate_documents", database=database, collection=collection, pipeline=pipeline,
-                     limit=limit, sanitize=sanitize, active_only=active_only) as audit:
+                     limit=limit, active_only=active_only) as audit:
             started_at = perf_counter()
             schema = dependencies.query_validator.get_schema(database, collection)
+            sanitize = schema.sanitize
             capped_limit = dependencies.query_validator.cap_limit(limit, schema.default_limit)
             active_only_applied = _applies_active_only(database, collection, active_only, _mentions_is_active(pipeline))
             if active_only_applied:
                 pipeline = [{"$match": dict(ACTIVE_FILTER)}, *pipeline]
             dependencies.query_validator.validate_pipeline(schema, pipeline)
-            pipeline = expand_mixed_date_pipeline(schema, pipeline)
+            pipeline = dependencies.projection_policy.secure_pipeline(schema, expand_mixed_date_pipeline(schema, pipeline))
             if _skipped_in_nonprod(dependencies, database, collection):
                 audit.result = _skipped_result(dependencies, started_at, documents=[], count_returned=0)
                 return audit.result
@@ -266,9 +277,13 @@ def register_query_tools(mcp, dependencies: AppDependencies) -> None:
         combined = {"$and": [filter, window]} if filter else window
         prepared, _ = _prepare_count_filter(dependencies, schema, combined, active_only=True)
         try:
-            return dependencies.repository.count(schema.database, schema.collection, prepared), 1
+            with _count_slots:
+                count = dependencies.repository.count(
+                    schema.database, schema.collection, prepared, max_time_ms=COUNT_ORDERS_MAX_TIME_MS
+                )
+            return count, 1
         except DataApiError:
-            if end - start <= COUNT_ORDERS_MIN_CHUNK:
+            if end - start <= COUNT_ORDERS_MIN_WINDOW:
                 raise
             middle = start + (end - start) / 2
             left, left_queries = _count_window(schema, filter, start, middle)
@@ -276,9 +291,10 @@ def register_query_tools(mcp, dependencies: AppDependencies) -> None:
             return left + right, left_queries + right_queries
 
     def _count_range(schema: CollectionSchema, filter: dict[str, Any], start: datetime, end: datetime) -> tuple[int, int]:
+        size = max(COUNT_ORDERS_WINDOW, (end - start) / COUNT_ORDERS_MAX_WINDOWS)
         chunks, cursor = [], start
         while cursor < end:
-            chunk_end = min(cursor + timedelta(days=COUNT_ORDERS_CHUNK_DAYS), end)
+            chunk_end = min(cursor + size, end)
             chunks.append((cursor, chunk_end))
             cursor = chunk_end
         with ThreadPoolExecutor(max_workers=COUNT_ORDERS_PARALLELISM) as pool:

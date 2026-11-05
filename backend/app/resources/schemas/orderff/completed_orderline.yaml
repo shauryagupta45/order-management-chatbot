@@ -154,8 +154,8 @@ fields:
     searchable: true
     filterable: true
     sortable: true
-    return_by_default: true
-    pii: false
+    return_by_default: false
+    pii: true
     exact_match: true
     examples:
       - vbhar03

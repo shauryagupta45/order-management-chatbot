@@ -18,7 +18,7 @@ from bson import json_util
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
-from pymongo.errors import PyMongoError
+from pymongo.errors import ExecutionTimeout, PyMongoError
 
 from backend.app.dependencies import AppDependencies, build_dependencies
 from backend.app.domain.errors import McpMongoError, ValidationError
@@ -45,6 +45,8 @@ class FindRequest(_Target):
 
 class CountRequest(_Target):
     filter: dict[str, Any] = Field(default_factory=dict)
+    # MongoDB stops the query after this many ms (maxTimeMS) instead of running on after the caller times out.
+    max_time_ms: int | None = Field(default=None, ge=1, le=60_000)
 
 
 class AggregateRequest(_Target):
@@ -88,6 +90,9 @@ def create_app(settings: DataApiSettings | None = None, dependencies: AppDepende
     deps = dependencies or build_dependencies(resolved_settings)
     validator = deps.query_validator
     repository = deps.repository
+    # PII is stripped here as well as in the MCP tools, so a client that calls this API directly gets the same output.
+    projection_policy = deps.projection_policy
+    sanitizer = deps.response_sanitizer
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -102,6 +107,13 @@ def create_app(settings: DataApiSettings | None = None, dependencies: AppDepende
     async def handle_bad_query(request: Request, exc: McpMongoError) -> JSONResponse:
         logger.warning("%s rejected: %s", request.url.path, exc)
         return JSONResponse(status_code=400, content={"status": "BAD_REQUEST", "message": str(exc)})
+
+    @app.exception_handler(ExecutionTimeout)
+    async def handle_time_limit(request: Request, exc: ExecutionTimeout) -> JSONResponse:
+        logger.warning("%s stopped by max_time_ms", request.url.path)
+        return JSONResponse(
+            status_code=504, content={"status": "TIMEOUT", "message": "Query exceeded max_time_ms"}
+        )
 
     @app.exception_handler(PyMongoError)
     async def handle_database_error(request: Request, exc: PyMongoError) -> JSONResponse:
@@ -124,14 +136,19 @@ def create_app(settings: DataApiSettings | None = None, dependencies: AppDepende
         limit = validator.cap_limit(request.limit, schema.default_limit)
         filter_ = _extended(request.filter)
         validator.validate_filter(schema, filter_)
-        documents = repository.find(
+        projection = (
+            projection_policy.build_projection(schema, request.projection)
+            if schema.sanitize
+            else _checked_projection(schema, request.projection)
+        )
+        documents = sanitizer.strip_sensitive_fields(schema, repository.find(
             database=request.database,
             collection=request.collection,
             filter=validator.normalize_filter(schema, filter_),
-            projection=_checked_projection(schema, request.projection),
+            projection=projection,
             sort=validator.validate_sort(schema, dict(request.sort) if request.sort else None),
             limit=limit,
-        )
+        ))
         logger.info("find %s.%s filter=%s limit=%d -> %d documents", request.database, request.collection,
                     _short(filter_), limit, len(documents))
         return _json({"documents": documents})
@@ -141,7 +158,9 @@ def create_app(settings: DataApiSettings | None = None, dependencies: AppDepende
         schema = validator.get_schema(request.database, request.collection)
         filter_ = _extended(request.filter)
         validator.validate_filter(schema, filter_)
-        total = repository.count(request.database, request.collection, validator.normalize_filter(schema, filter_))
+        total = repository.count(
+            request.database, request.collection, validator.normalize_filter(schema, filter_), request.max_time_ms
+        )
         logger.info("count %s.%s filter=%s -> %d", request.database, request.collection, _short(filter_), total)
         return _json({"count": total})
 
@@ -151,7 +170,10 @@ def create_app(settings: DataApiSettings | None = None, dependencies: AppDepende
         limit = validator.cap_limit(request.limit, schema.default_limit)
         pipeline = _extended(request.pipeline)
         validator.validate_pipeline(schema, pipeline)
-        documents = repository.aggregate(request.database, request.collection, pipeline, limit)
+        pipeline = projection_policy.secure_pipeline(schema, pipeline)
+        documents = sanitizer.strip_sensitive_fields(
+            schema, repository.aggregate(request.database, request.collection, pipeline, limit)
+        )
         logger.info("aggregate %s.%s pipeline=%s -> %d documents", request.database, request.collection,
                     _short(pipeline), len(documents))
         return _json({"documents": documents})

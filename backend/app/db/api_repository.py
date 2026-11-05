@@ -64,8 +64,11 @@ class ApiRepository:
         }
         return self._documents(self._request("POST", "/find", body))
 
-    def count(self, database: str, collection: str, filter: dict[str, Any]) -> int:
-        data = self._request("POST", "/count", {"database": database, "collection": collection, "filter": filter})
+    def count(self, database: str, collection: str, filter: dict[str, Any], max_time_ms: int | None = None) -> int:
+        body: dict[str, Any] = {"database": database, "collection": collection, "filter": filter}
+        if max_time_ms is not None:
+            body["max_time_ms"] = max_time_ms
+        data = self._request("POST", "/count", body)
         if not isinstance(data, dict) or "count" not in data:
             raise DataApiError("Data API /count response is missing 'count'.")
         return int(data["count"])

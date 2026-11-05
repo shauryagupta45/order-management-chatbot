@@ -7,7 +7,6 @@ Typical tool order:
 1. `resolve_query_target` or `search_schema_context` to pick the database, collection, and fields.
 2. `get_collection_context` if field rules are unclear.
 3. `count_orders` for order counts by date; otherwise `count_documents`, `find_documents`, or `aggregate_documents`.
-4. Mention the number of tokens used. 
 
 ## Order retention: `osco.order` vs `osco.orderHistory`
 

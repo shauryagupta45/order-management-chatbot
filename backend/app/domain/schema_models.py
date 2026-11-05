@@ -60,6 +60,9 @@ class CollectionSchema(BaseModel):
     identity: IdentityDefinition = Field(default_factory=IdentityDefinition)
     default_sort: SortDefinition | None = None
     default_limit: int = 10
+    # Strip PII/sensitive fields from find/aggregate results. Set only here in the schema YAML; the tools do not
+    # expose it, so the LLM cannot turn sanitization off.
+    sanitize: bool = True
     fields: dict[str, FieldSchema]
     sample_queries: list[SampleQuery] = Field(default_factory=list)
 

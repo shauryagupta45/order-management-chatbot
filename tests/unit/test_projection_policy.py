@@ -20,7 +20,7 @@ def test_default_projection_returns_known_safe_fields() -> None:
     assert projection["_id"] == 1
     assert projection["orderNumber"] == 1
     assert projection["versionNumber"] == 1
-    assert projection["customer.customerId"] == 1
+    assert "customer.customerId" not in projection
     assert "customer.email.id" not in projection
     assert "paymentDetails.tokenNumber" not in projection
 
@@ -100,3 +100,28 @@ def test_response_serializer_keeps_sensitive_fields_when_not_sanitizing() -> Non
     )
 
     assert documents == [{"customer": {"email": [{"_id": "person@example.com"}]}}]
+
+
+def test_pipeline_returning_whole_documents_gets_the_safe_projection() -> None:
+    pipeline = [{"$match": {"orderNumber": "1"}}, {"$addFields": {"day": "x"}}]
+
+    secured = ProjectionPolicy().secure_pipeline(schema(), pipeline)
+
+    assert secured[:2] == pipeline
+    projection = secured[-1]["$project"]
+    assert projection["orderNumber"] == 1 and projection["day"] == 1
+    assert "customer.email.id" not in projection and "customer.customerId" not in projection
+
+
+@pytest.mark.parametrize(
+    "pipeline",
+    [[{"$group": {"_id": "$storeNumber"}}], [{"$count": "n"}], [{"$project": {"orderNumber": 1}}]],
+)
+def test_pipeline_that_reshapes_output_is_left_alone(pipeline) -> None:
+    assert ProjectionPolicy().secure_pipeline(schema(), pipeline) == pipeline
+
+
+def test_exclusion_project_still_gets_the_safe_projection() -> None:
+    secured = ProjectionPolicy().secure_pipeline(schema(), [{"$project": {"orderNumber": 0}}])
+
+    assert len(secured) == 2

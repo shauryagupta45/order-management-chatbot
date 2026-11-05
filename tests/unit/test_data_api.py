@@ -37,8 +37,8 @@ class FakeRepository:
         self.calls.append(("find", database, collection, filter, projection, sort, limit))
         return [{"_id": ObjectId("507f1f77bcf86cd799439011"), "orderNumber": "1"}]
 
-    def count(self, database, collection, filter):
-        self.calls.append(("count", database, collection, filter))
+    def count(self, database, collection, filter, max_time_ms=None):
+        self.calls.append(("count", database, collection, filter, max_time_ms))
         return 3
 
     def aggregate(self, database, collection, pipeline, limit):
@@ -152,8 +152,40 @@ def test_api_repository_client_works_against_this_server(client: TestClient, rep
     assert api.ping() is True
     assert api.find("osco", "order", {"orderNumber": "1"}, {"orderNumber": 1}, None, 5) == [{"_id": oid, "orderNumber": "1"}]
     assert api.count("osco", "order", {"orderNumber": "1"}) == 3
+    assert api.count("osco", "order", {"orderNumber": "1"}, max_time_ms=20_000) == 3
+    assert repo.calls[-1][-1] == 20_000  # max_time_ms reaches the repository (MongoDB maxTimeMS)
     assert api.aggregate("osco", "order", [{"$group": {"_id": None, "count": {"$sum": 1}}}], 10) == [{"_id": None, "count": 3}]
     assert api.explain_find("osco", "order", {})["queryPlanner"]["winningPlan"]["stage"] == "IXSCAN"
 
     with pytest.raises(DataApiError, match="HTTP 400"):
         api.find("osco", "order", {"nope": 1}, None, None, 1)
+
+
+def test_direct_find_never_returns_pii(client: TestClient, repo: FakeRepository) -> None:
+    repo.find = lambda *args, **kwargs: [{"orderNumber": "1", "customer": {"email": {"id": "a@b.c"}, "customerId": "9"}}]
+
+    response = client.post("/find", json={"database": "osco", "collection": "order", "filter": {}})
+
+    assert response.json() == {"documents": [{"orderNumber": "1", "customer": {"email": {}}}]}
+
+
+def test_direct_find_cannot_project_pii(client: TestClient) -> None:
+    response = client.post("/find", json={"database": "osco", "collection": "order", "filter": {},
+                                          "projection": {"customer.email.id": 1}})
+
+    assert response.status_code == 400
+
+
+def test_direct_aggregate_cannot_read_pii(client: TestClient, repo: FakeRepository) -> None:
+    response = client.post("/aggregate", json={"database": "osco", "collection": "order",
+                                               "pipeline": [{"$group": {"_id": "$customer.email.id"}}]})
+
+    assert response.status_code == 400
+    assert not repo.calls
+
+
+def test_direct_aggregate_of_whole_documents_is_projected(client: TestClient, repo: FakeRepository) -> None:
+    client.post("/aggregate", json={"database": "osco", "collection": "order", "pipeline": [{"$match": {}}]})
+
+    pipeline = repo.calls[0][3]
+    assert "$project" in pipeline[-1] and "customer.email.id" not in pipeline[-1]["$project"]

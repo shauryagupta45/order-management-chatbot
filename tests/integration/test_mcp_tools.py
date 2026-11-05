@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -74,9 +75,10 @@ def build_test_dependencies(repository: FakeRepository) -> AppDependencies:
     )
 
 
-def test_find_documents_tool_returns_raw_by_default() -> None:
+def test_find_documents_tool_returns_raw_when_schema_disables_sanitize() -> None:
     repository = FakeRepository()
     dependencies = build_test_dependencies(repository)
+    dependencies.catalog.get_collection_schema("osco", "order").sanitize = False
     mcp = FakeMcp()
     register_query_tools(mcp, dependencies)
 
@@ -85,7 +87,6 @@ def test_find_documents_tool_returns_raw_by_default() -> None:
         collection="order",
         filter={"_id": "507f1f77bcf86cd799439011"},
         limit=5,
-        sanitize=False,
     )
 
     assert result["count_returned"] == 1
@@ -124,6 +125,16 @@ def test_find_documents_tool_sanitizes_by_default() -> None:
     ]
     assert result["sanitized"] is True
     assert repository.last_projection["_id"] == 1
+
+
+def test_llm_cannot_turn_off_sanitization() -> None:
+    mcp = FakeMcp()
+    register_query_tools(mcp, build_test_dependencies(FakeRepository()))
+
+    for tool in ("find_documents", "aggregate_documents"):
+        assert "sanitize" not in inspect.signature(mcp.tools[tool]).parameters
+    with pytest.raises(TypeError):
+        mcp.tools["find_documents"](database="osco", collection="order", filter={}, sanitize=False)
 
 
 class EmptyRepository(FakeRepository):
@@ -258,16 +269,17 @@ def test_active_only_can_be_disabled_or_overridden() -> None:
     pipeline = [{"$match": {"banner": "safeway"}}]
     other = mcp.tools["aggregate_documents"](database="osco", collection="store", pipeline=pipeline)
     assert other["active_only_applied"] is False
-    assert repository.last_pipeline == pipeline
+    assert repository.last_pipeline[0] == pipeline[0]  # no isActive stage added (a safe $project is appended)
 
 
 class WindowRepository(FakeRepository):
-    """Counts one order per hour in the requested window; fails windows longer than `fail_over_days`."""
+    """Counts one order per minute in the requested window; fails windows longer than `fail_over_hours`."""
 
-    def __init__(self, fail_over_days: int | None = None, history_ends: datetime | None = None) -> None:
+    def __init__(self, fail_over_hours: float | None = None, history_ends: datetime | None = None) -> None:
         super().__init__()
         self.calls: list[tuple[str, datetime, datetime]] = []
-        self.fail_over_days = fail_over_days
+        self.fail_over_hours = fail_over_hours
+        self.max_time_ms: set[int | None] = set()
         # Newest orderCreatedDate in osco.orderHistory, i.e. where count_orders hands off to osco.order.
         self.history_ends = history_ends or datetime(2026, 7, 30, 11, 59, 59, 999000, tzinfo=timezone.utc)
 
@@ -275,13 +287,14 @@ class WindowRepository(FakeRepository):
         assert (collection, sort) == ("orderHistory", [("orderCreatedDate", -1)])
         return [{"orderCreatedDate": self.history_ends.replace(tzinfo=None)}]  # json_util returns naive UTC
 
-    def count(self, database, collection, filter):
+    def count(self, database, collection, filter, max_time_ms=None):
         window = _find_date_window(filter)
         self.calls.append((collection, *window))
-        days = (window[1] - window[0]).total_seconds() / 86400
-        if self.fail_over_days is not None and days > self.fail_over_days:
+        self.max_time_ms.add(max_time_ms)
+        hours = (window[1] - window[0]).total_seconds() / 3600
+        if self.fail_over_hours is not None and hours > self.fail_over_hours:
             raise DataApiError("Data API POST /count failed: ReadTimeout")
-        return round(days * 24)
+        return round(hours * 60)
 
 
 def _find_date_window(value):
@@ -319,7 +332,7 @@ def test_count_orders_splits_last_six_months_between_collections(monkeypatch: py
         ("osco.order", "2026-07-30T12:00:00Z", "2026-10-30T12:00:00Z"),
         ("osco.orderHistory", "2026-04-30T12:00:00Z", "2026-07-30T12:00:00Z"),
     ]
-    assert result["total"] == (92 + 91) * 24  # one fake order per hour, no overlap at the cutoff
+    assert result["total"] == (92 + 91) * 24 * 60  # one fake order per minute, no overlap at the cutoff
     assert {collection for collection, *_ in repository.calls} == {"order", "orderHistory"}
 
 
@@ -332,7 +345,7 @@ def test_count_orders_uses_only_order_history_for_last_year(monkeypatch: pytest.
     result = mcp.tools["count_orders"](start="2025-10-28T05:00:00Z", end="2025-10-29T05:00:00Z")
 
     assert [p["collection"] for p in result["parts"]] == ["osco.orderHistory"]
-    assert result["total"] == 24 and result["warnings"] == []
+    assert result["total"] == 24 * 60 and result["warnings"] == []
 
 
 def test_count_orders_in_nonprod_queries_only_order(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -348,16 +361,51 @@ def test_count_orders_in_nonprod_queries_only_order(monkeypatch: pytest.MonkeyPa
     assert NONPROD_SKIPPED_NOTE in result["warnings"]
 
 
-def test_count_orders_splits_windows_that_time_out(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_count_orders_counts_a_day_in_three_hour_windows(monkeypatch: pytest.MonkeyPatch) -> None:
     _freeze_now(monkeypatch)
-    repository = WindowRepository(fail_over_days=10)
+    repository = WindowRepository()
     mcp = FakeMcp()
     register_query_tools(mcp, _prod_dependencies(repository))
 
-    result = mcp.tools["count_orders"](start="2025-01-01T00:00:00Z", end="2025-02-01T00:00:00Z")
+    result = mcp.tools["count_orders"](start="2026-10-29T05:00:00Z", end="2026-10-30T05:00:00Z")
 
-    assert result["total"] == 31 * 24
-    assert result["parts"][0]["queries"] > 1
+    assert result["total"] == 24 * 60 and result["parts"][0]["queries"] == 8
+    assert {end - start for _, start, end in repository.calls if _ == "order"} == {query_tools.COUNT_ORDERS_WINDOW}
+    assert repository.max_time_ms == {query_tools.COUNT_ORDERS_MAX_TIME_MS}
+
+
+def test_count_orders_bounds_the_number_of_windows_for_long_ranges(monkeypatch: pytest.MonkeyPatch) -> None:
+    _freeze_now(monkeypatch)
+    repository = WindowRepository()
+    mcp = FakeMcp()
+    register_query_tools(mcp, _prod_dependencies(repository))
+
+    result = mcp.tools["count_orders"](start="2025-01-01T00:00:00Z", end="2025-07-01T00:00:00Z")
+
+    assert result["total"] == 181 * 24 * 60
+    assert result["parts"][0]["queries"] <= query_tools.COUNT_ORDERS_MAX_WINDOWS
+
+
+def test_count_orders_splits_windows_that_time_out_down_to_an_hour(monkeypatch: pytest.MonkeyPatch) -> None:
+    _freeze_now(monkeypatch)
+    repository = WindowRepository(fail_over_hours=1)
+    mcp = FakeMcp()
+    register_query_tools(mcp, _prod_dependencies(repository))
+
+    result = mcp.tools["count_orders"](start="2026-10-29T05:00:00Z", end="2026-10-30T05:00:00Z")
+
+    assert result["total"] == 24 * 60
+    assert result["parts"][0]["queries"] > 8
+
+
+def test_count_orders_fails_if_an_hour_window_still_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    _freeze_now(monkeypatch)
+    repository = WindowRepository(fail_over_hours=0.5)
+    mcp = FakeMcp()
+    register_query_tools(mcp, _prod_dependencies(repository))
+
+    with pytest.raises(DataApiError):
+        mcp.tools["count_orders"](start="2026-10-29T05:00:00Z", end="2026-10-30T05:00:00Z")
 
 
 def test_count_orders_hands_off_where_order_history_ends(monkeypatch: pytest.MonkeyPatch) -> None:

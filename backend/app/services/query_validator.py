@@ -13,6 +13,9 @@ BLOCKED_KEYS = {"$where", "$function", "$accumulator", "$out", "$merge"}
 SAFE_OPERATORS = {"$eq", "$in", "$gt", "$gte", "$lt", "$lte", "$ne", "$regex"}
 LOGICAL_OPERATORS = {"$and", "$or"}
 SAFE_STAGES = {"$match", "$project", "$sort", "$limit", "$skip", "$group", "$unwind", "$addFields", "$count"}
+# Read the whole document, or a field picked by name at run time, so the field allowlist cannot see what they return.
+WHOLE_DOCUMENT_VARIABLES = {"$$ROOT", "$$CURRENT"}
+DYNAMIC_FIELD_OPERATORS = {"$getField", "$setField", "$unsetField"}
 
 
 class QueryValidator:
@@ -127,6 +130,61 @@ class QueryValidator:
                 if not isinstance(stage_value, dict):
                     raise ValidationError("$sort stage must be an object.")
                 self.validate_sort(schema, stage_value)
+        if schema.sanitize:
+            self._validate_pipeline_reads(schema, pipeline)
+
+    def _validate_pipeline_reads(self, schema: CollectionSchema, pipeline: list[dict[str, Any]]) -> None:
+        """Expressions may read only catalogued, non-PII fields, so PII cannot come back under another name
+        (e.g. {"$group": {"_id": "$customer.email.id"}}) and fields the catalog does not describe cannot come back at all."""
+        computed: set[str] = set()
+        for stage in pipeline:
+            stage_name, stage_value = next(iter(stage.items()))
+            if stage_name == "$addFields":
+                self._validate_reads(schema, list(stage_value.values()), computed)
+                computed.update(stage_value)
+            elif stage_name == "$project":
+                for field_name, value in stage_value.items():
+                    if isinstance(value, (bool, int)):
+                        if value and field_name != "_id":
+                            self._validate_read_path(schema, field_name, computed)
+                    else:
+                        self._validate_reads(schema, value, computed)
+            elif stage_name == "$group":
+                self._validate_reads(schema, stage_value, computed)
+                return  # later stages only see the group's output, which was built from checked fields
+            elif stage_name == "$count":
+                return
+
+    def _validate_reads(self, schema: CollectionSchema, value: Any, computed: set[str]) -> None:
+        if isinstance(value, str):
+            if value.startswith("$$"):
+                variable, _, path = value.partition(".")
+                if variable in WHOLE_DOCUMENT_VARIABLES:
+                    if not path:
+                        raise ValidationError(f"'{variable}' returns whole documents, including PII; name the fields instead.")
+                    self._validate_read_path(schema, path, computed)
+            elif value.startswith("$"):
+                self._validate_read_path(schema, value[1:], computed)
+        elif isinstance(value, dict):
+            for key, nested in value.items():
+                if key in DYNAMIC_FIELD_OPERATORS:
+                    raise ValidationError(f"Operator '{key}' is not allowed; reference fields directly.")
+                if key != "$literal":  # a $literal string is a constant, not a field path
+                    self._validate_reads(schema, nested, computed)
+        elif isinstance(value, list):
+            for item in value:
+                self._validate_reads(schema, item, computed)
+
+    def _validate_read_path(self, schema: CollectionSchema, path: str, computed: set[str]) -> None:
+        if any(path == name or path.startswith(name + ".") for name in computed):
+            return
+        field_schema = schema.get_field(path)
+        if field_schema is None:
+            raise ValidationError(f"Aggregation reads '{path}', which is not a field in {schema.database}.{schema.collection}.")
+        hidden = [name for name, field in schema.fields.items()
+                  if not field.returnable and (name == path or name.startswith(path + "."))]
+        if hidden:
+            raise ValidationError(f"Aggregation output cannot include PII/sensitive field '{hidden[0]}'.")
 
     def _reject_blocked_recursive(self, value: Any) -> None:
         if isinstance(value, dict):

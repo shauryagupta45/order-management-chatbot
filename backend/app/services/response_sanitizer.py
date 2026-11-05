@@ -24,6 +24,12 @@ class ResponseSanitizer:
     def sanitize_documents(self, schema: CollectionSchema, documents: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
         return self.format_documents(schema, documents, sanitize=True)
 
+    def strip_sensitive_fields(self, schema: CollectionSchema, documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Remove PII/sensitive fields but leave value types alone (the data API returns Extended JSON)."""
+        if not schema.sanitize:
+            return documents
+        return [self._remove_sensitive_fields(schema, document) for document in documents]
+
     def serialize_documents(self, documents: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
         return self.format_documents(None, documents, sanitize=False)
 
