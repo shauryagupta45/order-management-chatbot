@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from backend.app.domain.errors import ValidationError
 from backend.app.domain.schema_models import CollectionSchema
 
@@ -36,3 +38,18 @@ class ProjectionPolicy:
                 if not field_schema.returnable:
                     projection[field_name] = 0
         return projection
+
+    def secure_pipeline(self, schema: CollectionSchema, pipeline: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """A pipeline without $group, $count or an inclusion $project returns whole documents, including fields the
+        catalog does not describe; end it with the projection find uses by default (plus fields it computed)."""
+        if not schema.sanitize or any(_reshapes_output(stage) for stage in pipeline):
+            return pipeline
+        computed = {name: 1 for stage in pipeline for name in stage.get("$addFields", {})}
+        return [*pipeline, {"$project": {**self.build_projection(schema, None), **computed}}]
+
+
+def _reshapes_output(stage: dict[str, Any]) -> bool:
+    if "$group" in stage or "$count" in stage:
+        return True
+    project = stage.get("$project")
+    return isinstance(project, dict) and any(name != "_id" and value not in (0, False) for name, value in project.items())

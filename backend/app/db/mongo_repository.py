@@ -32,8 +32,9 @@ class MongoRepository:
             cursor = cursor.sort(sort)
         return list(cursor.limit(limit))
 
-    def count(self, database: str, collection: str, filter: dict[str, Any]) -> int:
-        return self._client_provider.client[database][collection].count_documents(filter)
+    def count(self, database: str, collection: str, filter: dict[str, Any], max_time_ms: int | None = None) -> int:
+        options = {"maxTimeMS": max_time_ms} if max_time_ms is not None else {}
+        return self._client_provider.client[database][collection].count_documents(filter, **options)
 
     def aggregate(self, database: str, collection: str, pipeline: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
         capped_pipeline = [*pipeline, {"$limit": limit}]
